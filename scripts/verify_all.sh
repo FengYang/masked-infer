@@ -27,6 +27,10 @@ BASELINE_MODE=0
 if [ "${1:-}" = "-baseline" ] || [ "${VERIFY_BASELINE:-0}" = "1" ]; then
   BASELINE_MODE=1
 fi
+# REMOTE_SKIPS：真机段门控累计的 SKIP 用例数（§5.1：SKIP 按「未取证」，不得据此宣称 PASS）。
+# 门控一律用 assert_run_strict（发现 SKIP 立即 die）；段末再独立复扫全部 gate*.log 兜底，
+# 只要 >0 就禁止输出 [REMOTE-PASS]（防某个门控漏改 strict 仍在段末宣称全取证）。
+REMOTE_SKIPS=0
 TMP_DIR="$(mktemp -d)"
 # Git Bash 的 mktemp 可能返回 C:\... 形式；转成 POSIX 路径才能作为 PATH 条目注入假 go。
 if command -v cygpath >/dev/null 2>&1; then
@@ -67,6 +71,29 @@ assert_run() {
   done
   if grep -q '^--- SKIP' "$log"; then
     warn "${label} 存在 SKIP 用例：按 §5.1 判未取证，不得据此宣称 PASS"
+  fi
+}
+
+# assert_run_strict <log> <label> [必须实跑的测试函数名...]
+# 门控专用断言（§5.1）：在 assert_run 的三重断言（有 RUN / 条数 >= 目标数 / 逐名命中）
+# 之上，追加「输出不得含 --- SKIP」。
+#
+# 为什么必须单独有这一层：门控 3 的 TestRoute2StepRealQwenGolden 在模型权重不在本机时
+# 主动 t.Skip（其头注写明「权重不在本机时 Skip，写明 D2 未执行，不伪造 PASS」）。
+# 若只判「=== RUN 存在」，该用例会：=== RUN 有 → assert_run 判过 → 门控 3 判过 →
+# 段末照打 [REMOTE-PASS]，直接把「SKIP = 未取证」洗成「门控已取证」，与 §5.1 直接冲突。
+#
+# 注意：静态段的自检（GUARD-SELFTEST / GUARD-POS / GUARD-NEG）继续用宽松的 assert_run，
+# 那里是「断言函数本身的行为」而非门控取证，不能套 strict（否则会自证循环）。
+assert_run_strict() {
+  local log="$1" label="$2"
+  assert_run "$@"
+  if grep -q '^--- SKIP' "$log"; then
+    local skips
+    skips="$(grep -c '^--- SKIP' "$log" || true)"
+    skips="${skips:-0}"
+    REMOTE_SKIPS=$((REMOTE_SKIPS + skips))
+    die "${label} 存在 ${skips} 条 --- SKIP 用例：按 §5.1 判未取证，不得宣称 PASS（段末判绿标记已被阻止）"
   fi
 }
 
@@ -313,6 +340,43 @@ DUMMYGO
   [ "$rc" -ne 0 ] || die "-run 无匹配样本未被守卫判红（假绿通道未堵住）"
   pass "=== RUN 守卫双向验证（真实 go test -v：有匹配 ${pos_run_count} 条 RUN 不误判红 / 无匹配 ${neg_run_count} 条 RUN 必判红；tee 落文件后 grep，无 SIGPIPE 假红）"
 
+  # (k3) assert_run_strict 双向自检（F-B 回归护栏，CI 可跑、不需要真机）
+  #   为什么要有这条：(k)/(k2) 只证明「有没有实跑」，不证明「SKIP 会不会被洗成 PASS」。
+  #   门控 3 的测试在权重缺失时主动 t.Skip，若只有宽松断言，=== RUN 存在就能一路判绿、
+  #   段末照打判绿标记 —— 这正是 F-B 的假 PASS 通道。此处用真 go test -v 的 Skip 样本
+  #   把 strict 的「差量」测出来：
+  #     样本 A（--- SKIP）：宽松 assert_run 必须判过（对照，证明差量确实来自 strict）、
+  #                        assert_run_strict 必须判红；
+  #     样本 B（纯 PASS） ：assert_run_strict 必须不误判红。
+  cat > "$guard_pkg/dummy_skip_test.go" <<'DUMMYSKIPGO'
+package dummy
+
+import "testing"
+
+// TestGuardSkip 模拟「模型权重不在本机时 Skip」的门控测试形态。
+func TestGuardSkip(t *testing.T) {
+	t.Skip("guard skip sample: 模拟权重缺失导致的 Skip")
+}
+DUMMYSKIPGO
+  ( cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardSkip$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_skip.log" ) >/dev/null \
+    || die "SKIP 哑测试 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_skip.log")"
+  grep -q '^=== RUN[[:space:]]\+TestGuardSkip$' "$TMP_DIR/guard_skip.log" \
+    || die "SKIP 哑测试未产生 === RUN（样本无效）"
+  grep -q '^--- SKIP' "$TMP_DIR/guard_skip.log" \
+    || die "SKIP 哑测试未产生 --- SKIP 行（样本无效，无法验证 strict）"
+  rc=0
+  ( assert_run "$TMP_DIR/guard_skip.log" "GUARD-SKIP-LOOSE" TestGuardSkip ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] \
+    || die "对照失败：宽松 assert_run 在 SKIP 样本上不应判红，否则无法归因 strict 的差量"
+  rc=0
+  ( assert_run_strict "$TMP_DIR/guard_skip.log" "GUARD-SKIP-STRICT" TestGuardSkip ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || die "assert_run_strict 在 --- SKIP 样本上未判红（SKIP 仍可冒充门控取证）"
+  rc=0
+  ( assert_run_strict "$TMP_DIR/guard_pos.log" "GUARD-PASS-STRICT" TestGuardReal ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || die "assert_run_strict 在纯 PASS 样本上误判红"
+  pass "assert_run_strict 双向验证（同一 Skip 样本：宽松断言判过、strict 判红 → 差量可归因；纯 PASS 样本 strict 不误判红）"
+
   # (l) 仓库可 clone 留证（只读，临时目录，不污染仓库）
   if [ -d .git ]; then
     [ "$(git rev-parse --is-inside-work-tree)" = "true" ] || die "非 git 工作树"
@@ -340,6 +404,8 @@ DUMMYGO
 #     * grep -q 直连管道 ⇒ 命中即关读端 ⇒ SIGPIPE(141) + pipefail ⇒ 有匹配反被误判红；
 #     * 两者都避开后，才能防「-run 无匹配却 exit 0」的恒假 PASS。
 #   - assert_run 同时断言实跑条数 >= -run 目标数并逐名核对，防「只跑一个也算过」
+#   - 门控 1–5 一律用 assert_run_strict（额外禁止 --- SKIP），并在段末独立复扫
+#     gate*.log 兜底：SKIP = 未取证（§5.1），绝不允许洗完再打 [REMOTE-PASS]。
 # ---------------------------------------------------------------------------
 run_remote() {
   echo "== 🖥 真机段（Go 1.26 / 192.168.31.248；仅阶段 1+）=="
@@ -366,16 +432,22 @@ run_remote() {
   GOWORK=off ACCEL_BACKEND_LIB=ascend CGO_ENABLED=1 go build ./...
 
   # 门控 3（新库侧）：阶段 3 起 golden 测试随 step/ 迁入新库、CA-3 改造对象也在新库，
-  # 必须验新库侧；用目录存在性守卫避免阶段 0/1/2 报错。
-  if [ -d "$SUB_REPO/adapters/qwen" ]; then
+  # 必须验新库侧。
+  # 守卫必须绑「该测试文件」而非「其父目录」：阶段 1 已迁入 adapters/qwen（目录存在），
+  # 但 route2step_golden_test.go 阶段 3 才迁 ⇒ 用 -d 判目录会在阶段 1/2 误入本分支，
+  # 导致 -run 无匹配（go test rc=0、无 === RUN）被 assert_run 判红，真机段恒失败。
+  # 改为 -f 判文件：阶段 3 迁入该测试后自动生效。
+  GATE3_SUB_RAN=0
+  if [ -f "$SUB_REPO/adapters/qwen/route2step_golden_test.go" ]; then
+    GATE3_SUB_RAN=1
     (
       cd "$SUB_REPO"
       GOWORK=off go test ./adapters/qwen/... -run TestRoute2StepRealQwenGolden \
         -count=1 -v 2>&1 | tee "$TMP_DIR/gate3_sub.log"
     )
-    assert_run "$TMP_DIR/gate3_sub.log" "门控3(新库侧)" TestRoute2StepRealQwenGolden
+    assert_run_strict "$TMP_DIR/gate3_sub.log" "门控3(新库侧)" TestRoute2StepRealQwenGolden
   else
-    echo "SKIP: 门控3 新库侧（adapters/qwen 尚未迁入，阶段 3 起生效）"
+    echo "SKIP: 门控3 新库侧（adapters/qwen/route2step_golden_test.go 尚未迁入，阶段 3 迁入后自动生效）"
   fi
 
   # 主仓：在 go.work workspace 内跑全量回归（勿加 GOWORK=off）
@@ -392,7 +464,7 @@ run_remote() {
     go test ./cipher/mask/... \
       -run 'TestHMACPRGMatchesLegacy|TestHMACPRGEqualsIntlProviderKeystream|TestIntlStreamWithProviderEqualsStreamDomain|TestSM4StreamDeterministic|TestSM4VsHMACNotInteroperable|TestNewStreamWithProviderKeySize' \
       -count=1 -v 2>&1 | tee "$TMP_DIR/gate1.log"
-    assert_run "$TMP_DIR/gate1.log" "门控1" \
+    assert_run_strict "$TMP_DIR/gate1.log" "门控1" \
       TestHMACPRGMatchesLegacy TestHMACPRGEqualsIntlProviderKeystream \
       TestIntlStreamWithProviderEqualsStreamDomain TestSM4StreamDeterministic \
       TestSM4VsHMACNotInteroperable TestNewStreamWithProviderKeySize
@@ -402,12 +474,12 @@ run_remote() {
     #   MaxAbsDiff ≤ 5e-3、top-1 一致。
     go test ./gateway/route2/orchestrator/... \
       -run 'TestFormAEquivalence|TestFormAKVConsistency' -count=1 -v 2>&1 | tee "$TMP_DIR/gate2.log"
-    assert_run "$TMP_DIR/gate2.log" "门控2" TestFormAEquivalence TestFormAKVConsistency
+    assert_run_strict "$TMP_DIR/gate2.log" "门控2" TestFormAEquivalence TestFormAKVConsistency
 
     # 门控 3（主仓侧）：基线形式；阶段 4 删主仓包后移除本行。
     #   282 步 top-1=23811 / maxRelErr=0.0390；新库侧命令见上方（阶段 3 起生效）。
     go test ./... -run 'TestRoute2StepRealQwenGolden' -count=1 -v 2>&1 | tee "$TMP_DIR/gate3_main.log"
-    assert_run "$TMP_DIR/gate3_main.log" "门控3(主仓侧)" TestRoute2StepRealQwenGolden
+    assert_run_strict "$TMP_DIR/gate3_main.log" "门控3(主仓侧)" TestRoute2StepRealQwenGolden
 
     # 门控 4：主仓全量 build/vet/test + SBOM gate 不回归（已在上方执行），
     #         发布前另按 SBOM/README.md 重生成并复核。
@@ -416,7 +488,34 @@ run_remote() {
     go run "$SUB_REPO/scripts/verify_golden_against_main.go" \
       -golden "$SUB_REPO/masklite/testdata/stream.golden"
   )
-  echo "[REMOTE-PASS] 真机段完成：门控 1–5 已实际取证"
+  # 段末总闸（F-B 第二层，防「漏改 strict 仍在段末宣称全取证」）：
+  #   独立复扫本次全部门控日志，任何 --- SKIP 都禁止输出 [REMOTE-PASS]。
+  #   与 assert_run_strict 的即时 die 是**双保险**，不是重复：
+  #   - 门控 1/2/3(主仓侧) 跑在 `( cd "$MAIN_REPO" ... )` 子 shell 里，子 shell 内的
+  #     REMOTE_SKIPS 自增不会回传父 shell（这是 shell 语义，不是 bug），所以
+  #     「日志复扫」才是这几段计数的**权威来源**；strict 负责当场判红、给出精确 label。
+  #   - 本闸同时兜住「将来新增门控但忘了用 strict」这类回归。
+  local_gate_skips=0
+  for gate_log in "$TMP_DIR"/gate*.log; do
+    [ -f "$gate_log" ] || continue
+    n="$(grep -c '^--- SKIP' "$gate_log" || true)"
+    n="${n:-0}"
+    if [ "$n" -gt 0 ]; then
+      echo "  [SKIP-DETECTED] $(basename "$gate_log")：${n} 条 --- SKIP" >&2
+    fi
+    local_gate_skips=$((local_gate_skips + n))
+  done
+  total_skips=$((REMOTE_SKIPS + local_gate_skips))
+  if [ "$total_skips" -gt 0 ]; then
+    die "真机段累计 ${total_skips} 条 --- SKIP 用例（strict 计数=${REMOTE_SKIPS}，日志复扫=${local_gate_skips}）：按 §5.1 判未取证，禁止输出段末判绿标记"
+  fi
+  # 文案不得超出实际取证范围：阶段 1/2 门控 3 新库侧按设计未启用（测试文件阶段 3 才迁入），
+  # 此时不能笼统宣称「门控 1–5 已实际取证」，须显式标出哪一项未启用。
+  if [ "$GATE3_SUB_RAN" -eq 1 ]; then
+    echo "[REMOTE-PASS] 真机段完成：门控 1–5 已实际取证（0 条 SKIP；含门控 3 新库侧）"
+  else
+    echo "[REMOTE-PASS] 真机段完成：门控 1–4 / 5（主仓侧）已实际取证（0 条 SKIP）；门控 3 新库侧按设计未启用（阶段 3 迁入 route2step_golden_test.go 后自动生效）"
+  fi
 }
 
 case "${1:-}" in
