@@ -34,4 +34,12 @@ if grep -nE "^(${MAIN_MOD}/|github\.com/${SUB_ORG}/security-ai-gateway/|github\.
   exit 1
 fi
 
-echo "G1 PASS: zero forbidden prefix in $(wc -l < "${DEPS_FILE}") deps"
+# 只改输出文案，不改判定逻辑：空模块（0 deps）时明确标注「空集判绿」，
+# 避免把无包可扫误读为实质闭包已验证；文案仍以 "G1 PASS" 开头，保证既有
+# 断言（verify_all.sh 场景 A/B/C 与 QA 样本组）不受影响。
+DEP_COUNT="$(wc -l < "${DEPS_FILE}" | tr -d '[:space:]')"
+if [ "${DEP_COUNT}" -eq 0 ]; then
+  echo "G1 PASS (empty module / 0 deps): 空集判绿，实质闭包判绿须待阶段 1 有包后复验"
+else
+  echo "G1 PASS: zero forbidden prefix in ${DEP_COUNT} deps"
+fi

@@ -2,7 +2,8 @@ name: masked-infer CI
 
 on:
   push:
-    branches: [main]
+    # 新库本地初始分支为 master；阶段 5 发布前与远端默认分支对齐。
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
 
@@ -30,6 +31,8 @@ jobs:
 
   # G2 golden 逐字节一致性（阶段 1 起生效）。阶段 0 的 masklite 尚无 .go 源码，
   # 用文件存在性守卫避免判红；CA-1 落地后自动启用。
+  # 阶段 1 CA-1 交付必须含 masklite/masklite_test.go 且测试函数名冻结为 TestGolden
+  # （与下方守卫一致）；否则 -run 无匹配仍 exit 0，会静默判绿。
   g2:
     name: G2 stream golden
     runs-on: ubuntu-latest
@@ -43,10 +46,12 @@ jobs:
       - name: Run G2 golden test
         shell: bash
         run: |
-          if [ -f masklite/masklite.go ]; then
-            go test ./masklite/... -run TestGolden -count=1
+          set -euo pipefail
+          if [ -f masklite/masklite.go ] && [ -f masklite/masklite_test.go ]; then
+            go test ./masklite/... -run TestGolden -count=1 -v 2>&1 | tee /tmp/g2.log
+            grep -q '^=== RUN   TestGolden' /tmp/g2.log || { echo "G2 FAIL: no TestGolden executed"; exit 1; }
           else
-            echo "G2 SKIP (Stage 0): masklite/masklite.go absent; golden test starts at Stage 1 / CA-1"
+            echo "G2 SKIP (Stage 0): masklite source/test absent; golden test starts at Stage 1 / CA-1"
           fi
 
   # cgo / !cgo 双构建。
@@ -69,12 +74,11 @@ jobs:
         shell: bash
         run: go build ./...
 
-  # 🖥 待环境就绪：GPU 轨道，本轮不执行。
-  # CUDA 与昇腾为双一等公民，两个 ACCEL_BACKEND_LIB 取值并列保留配置骨架；
-  # 待真机 GPU 环境就绪后去掉 if: false 并补齐驱动依赖即可启用。
+  # 🖥 待环境就绪：GPU 轨道，环境恢复后显式启用并取证；CUDA 与 ascend 并列双一等公民。
+  # 默认不执行：仅当执行人手动 workflow_dispatch 显式触发时启用，并须先补齐 GPU 驱动依赖。
   accel:
     name: accel (ACCEL_BACKEND_LIB=${{ matrix.accel }})
-    if: false
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
