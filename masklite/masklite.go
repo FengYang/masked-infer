@@ -15,9 +15,9 @@ const MinSeedLen = 32
 
 // PRG 确定性伪随机流生成器（P0-4 §5.3.2）：生成 n 字节确定性流。
 //
-// 实现有二：
-//   - hmacPRG：profile 无关的 HMAC-SHA256 PRG（复现现役算法，intl 默认 + sm 桥接用）；
-//   - provPRG：经 cryptop.Provider.Keystream，算法随 profile（intl=HMAC-SHA256 / sm=SM4-CTR）。
+// 实现：本包只提供 hmacPRG（profile 无关的 HMAC-SHA256 PRG）。
+// profile 绑定的实现（intl=HMAC-SHA256 / sm=SM4-CTR，经主仓密码 provider）
+// 不在本包，留在主仓 `cipher/mask`；本包不依赖任何密钥/证明设施。
 //
 // 调用方按 §5.3.2「PRG 选择点表」选构造器。
 type PRG interface {
@@ -128,9 +128,9 @@ var _ MaskStream = (*Stream)(nil)
 
 // hmacPRG 直接绑 crypto/hmac+sha256，**复现 cipher/mask 现役算法**。
 //
-// **存在理由（N-P0-2）**：`cryptop.Provider` 是 profile 绑定的（sm 的 Keystream 只产 SM4），
-// 而 `hmac-sha256` 路径（intl 默认 + sm 桥接）需产 HMAC-SHA256 流 ⇒ 必须有 profile 无关的
-// 独立原语承载。**这是 Provider 之外的唯一例外**（§9.1 边界）：仅 Go 服务/sidecar 使用；
+// **存在理由（N-P0-2）**：profile 绑定的 Keystream（sm 只产 SM4）由主仓密码 provider 承担；
+// 而 `hmac-sha256` 路径（intl 默认 + sm 桥接）需产 HMAC-SHA256 流 ⇒ 本包只承载这条
+// profile 无关路径。**这是 provider 之外的唯一例外**（§9.1 边界）：仅 Go 服务/sidecar 使用；
 // wasm 插件禁止引用（仍经 `/v1/mask/stream`）。
 type hmacPRG struct {
 	key    []byte
@@ -149,7 +149,8 @@ func newHMACPRG(key, domain []byte) (*hmacPRG, error) {
 }
 
 // Keystream 输出 = concat_{k=0..} HMAC-SHA256(key, BE64(ctr+k)‖domain)[:8]，截断到 n 字节。
-// 与 `cryptop.intlProvider.Keystream` 逐字节等价（T-5.3-8）。
+// 与主仓 `cipher/mask` 的 hmacPRG 逐字节等价（T-5.3-8）；跨实现等价由 G2 golden
+// 与主仓侧 `verify_golden_against_main.go` 双向校验。
 func (g *hmacPRG) Keystream(n int) []byte {
 	if n <= 0 {
 		return nil
