@@ -11,8 +11,22 @@
 //
 // 运行（本机 go1.20.3 可跑）：
 //
+//	# baseline 模式：扫主仓，产出/比对闭包基线（S2/S3 真判）
 //	GO111MODULE=off go run scripts/check_import_closure.go \
 //	    -root <MAIN_REPO> -mode baseline -out scripts/closure-baseline.json
+//
+//	# verify 模式：扫新库，断言零主仓依赖（S1/S4/S6 真判；S2/S3 显式 SKIP，理由见 main 注释）
+//	# 禁用前缀由 scripts/verify_all.sh 注入（主仓裸名 / 主仓 module 路径 / 国密三方库前缀）。
+//	# 注释里刻意不写出这些字面量：静态自检 (g) 会 grep 全库 *.go 的主仓/国密字面量，
+//	# 写进本文件会让工具自身被误判为「白名单外命中」。
+//	GO111MODULE=off go run scripts/check_import_closure.go \
+//	    -root <SUB_REPO> -mode verify \
+//	    -forbid-prefix '<MAIN_ORG>/' \
+//	    -forbid-prefix '<MAIN_MODULE>/' \
+//	    -forbid-prefix '<GM_LIB_MODULE>'
+//
+// 注意（Windows 本机）：`go run` 生成的临时 exe 可能因安全策略报 Access is denied，
+// 请改用 `GO111MODULE=off go build -o <TMP>/cic scripts/check_import_closure.go` 再执行。
 package main
 
 import (
@@ -64,12 +78,29 @@ var forbiddenFragments = []string{
 	"deploy/higress/",
 }
 
+// skipRules 写入 JSON 报告，是已提交基线 closure-baseline.json 的组成部分：
+// **文案一字不可改**，否则 baseline 字节比对（cmp）必然失败。
+// 关于 _test.go 的补充说明只能写在这里（注释），不得塞进下面的字符串：
+// verify 模式同样扫描 _test.go —— 随迁测试曾把主仓路径带进闭包（core/multilayer_masked_test.go
+// 历史上 import 过 cipher/mask），故测试文件必须纳入零主仓依赖判定。
 var skipRules = []string{
 	"跳过目录 .git",
 	"跳过目录 vendor / node_modules",
 	"跳过所有隐藏目录（.tools / .gopath-p24 等工具链缓存，非主仓源码）",
 	"仅扫描 *.go；_test.go 单独计数但同样计入闭包",
 	"只读：不写入被扫描仓库",
+}
+
+// verifyModeWhitelist 为 verify 模式唯一白名单：rel 路径**逐字相等**匹配
+// （map 查表，不是 strings.HasPrefix / strings.Contains，避免 "scripts/verify_golden_against_main.go.bak"
+// 或子目录同名文件被误放行）。
+//
+// 存在理由：真机复核工具 verify_golden_against_main.go 必须在主仓 module 下 import 主仓
+// cipher/mask 才能对拍 golden 向量，因此不能计入新库「零主仓依赖」判定。
+// 每次 SKIP 都会打印文件路径，并汇总打印被跳过文件数；该数应恒为 1，若某天变成 2，
+// 一眼即可看出白名单被扩大（构建/门禁双重可审计）。
+var verifyModeWhitelist = map[string]bool{
+	"scripts/verify_golden_against_main.go": true,
 }
 
 type Hit struct {
@@ -106,8 +137,11 @@ type Report struct {
 	ForbiddenPathFiles []string            `json:"forbidden_path_files_present"`
 	// ForbiddenPrefixHits：未传 -forbid-prefix 时为 nil → omitempty 省略（保持 baseline 字节一致）；
 	// 传了则始终输出数组（零命中为 []），供 verify 模式机械断言「S6 零命中」。
-	ForbiddenPrefixHits *[]string   `json:"forbidden_prefix_hits,omitempty"`
-	SelfChecks          []SelfCheck `json:"self_checks"`
+	ForbiddenPrefixHits *[]string `json:"forbidden_prefix_hits,omitempty"`
+	// WhitelistSkippedFiles：verify 模式跳过的白名单文件（baseline 恒为 nil → omitempty 省略），
+	// 供审计白名单是否被人为扩大（应恒为 1 个）。
+	WhitelistSkippedFiles []string    `json:"whitelist_skipped_files,omitempty"`
+	SelfChecks            []SelfCheck `json:"self_checks"`
 }
 
 func shouldSkipDir(name, path, root string) bool {
@@ -204,8 +238,10 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 		rel = filepath.ToSlash(rel)
 		// verify 模式跳过唯一白名单：真机复核工具 verify_golden_against_main.go 必须 import 主仓
 		// cipher/mask（在 worktree 内以主仓 module 运行），故不计入新库「零主仓依赖」判定。
-		if mode == "verify" && rel == "scripts/verify_golden_against_main.go" {
+		// 精确路径逐字相等匹配（map 查表），不做前缀/Contains 判断。
+		if mode == "verify" && verifyModeWhitelist[rel] {
 			fmt.Printf("SKIP whitelist (verify mode): %s（真机复核工具，唯一白名单，须 import 主仓 cipher/mask）\n", rel)
+			report.WhitelistSkippedFiles = append(report.WhitelistSkippedFiles, rel)
 			return nil
 		}
 		report.TotalGoFiles++
@@ -297,6 +333,7 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 	if report.ForbiddenPrefixHits != nil {
 		sort.Strings(*report.ForbiddenPrefixHits)
 	}
+	sort.Strings(report.WhitelistSkippedFiles)
 	return report, nil
 }
 
@@ -336,12 +373,22 @@ func evaluate(report *Report) {
 
 	if report.Mode == "verify" {
 		// S6（verify 核心门禁）：禁用前缀零命中，且必须真的传了 -forbid-prefix。
-		if report.ForbiddenPrefixHits == nil {
+		// 同时把「_test.go 是否被纳入扫描」并入本门禁：G1 的关键风险之一就是随迁测试把主仓
+		// 路径带进闭包（历史上 core/multilayer_masked_test.go 就 import 过 cipher/mask）。
+		// 若将来有人让扫描器跳过 _test.go，test_files 会归零 → S6 直接 FAIL（fail-closed）。
+		switch {
+		case report.ForbiddenPrefixHits == nil:
 			add("S6", false, "S6 失败：verify 模式未传 -forbid-prefix，无法判定零命中")
-		} else {
+		case report.TotalTestGoFiles == 0:
+			add("S6", false, "S6 失败：verify 模式未扫到任何 _test.go（test_files=0），测试文件路径未被覆盖")
+		default:
 			add("S6", len(*report.ForbiddenPrefixHits) == 0,
-				"禁用前缀零命中（forbidden_prefix_hits=%d）", len(*report.ForbiddenPrefixHits))
+				"禁用前缀零命中（forbidden_prefix_hits=%d；已覆盖 test_files=%d，白名单跳过=%d）",
+				len(*report.ForbiddenPrefixHits), report.TotalTestGoFiles, len(report.WhitelistSkippedFiles))
 		}
+		// 白名单跳过数必须可审计；verify 模式下恒为 1（超过 1 说明白名单被扩大，需人工复核）。
+		fmt.Printf("VERIFY_WHITELIST_SKIPPED_FILES=%d（应为 1；>1 说明白名单被扩大）\n",
+			len(report.WhitelistSkippedFiles))
 	}
 }
 
@@ -357,10 +404,23 @@ func (s *stringSliceFlag) Set(v string) error {
 
 func main() {
 	root := flag.String("root", "", "扫描根目录（必填，通常为主仓根目录）")
-	mode := flag.String("mode", "baseline", "扫描模式：baseline（主仓基线）| verify（新库零依赖核验）")
+	// 模式职责分工（勿删；S2/S3 在 verify 下 SKIP 是刻意设计，不是遗漏或"悄悄删掉"）：
+	//
+	//	-mode baseline（-root <主仓>）：
+	//	    S2 闭集分组 + S3 new_repo_cross_hits 真判 —— 守「主仓不得反向 import 新库」的
+	//	    方向性约束（阶段 4 删包后仍需长期持续守）。
+	//
+	//	-mode verify（-root <新库>）：
+	//	    S6 真判（新库不得 import 主仓前缀 / 第三方向量前缀），配合 S1 解析零失败与
+	//	    S4 禁碰路径零命中。此时 S2/S3 显式 SKIP：new_repo_cross_hits 的定义是
+	//	    「主仓里有文件 import 了新库路径」，扫描对象换成新库自己后，core/plan/demo/
+	//	    masklite 之间互相 import 天然命中该词条（实测 19 条），那是自引用而非缺陷；
+	//	    即判据与扫描对象不匹配，恒真恒 FAIL，因此不属于本模式的判据。
+	//	    覆盖不会因此丢失：方向性约束由 baseline 模式的 S3 承担，两模式分工互补。
+	mode := flag.String("mode", "baseline", "扫描模式：baseline（主仓基线；S2/S3 真判）| verify（新库零主仓依赖；S1/S4/S6 真判，S2/S3 显式 SKIP 因判据为主仓语义）")
 	out := flag.String("out", "", "落盘 JSON 基线报告路径（可选）")
 	var forbidPrefixes stringSliceFlag
-	flag.Var(&forbidPrefixes, "forbid-prefix", "禁用的 import 前缀（可重复），命中项写入 forbidden_prefix_hits")
+	flag.Var(&forbidPrefixes, "forbid-prefix", "禁用的 import 前缀（可重复），命中项写入 forbidden_prefix_hits；verify 模式必须至少传 1 个，否则 S6 FAIL")
 	flag.Parse()
 
 	if *root == "" {

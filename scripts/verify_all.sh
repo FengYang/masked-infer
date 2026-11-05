@@ -193,6 +193,15 @@ FAKEGO
       -forbid-prefix 'github.com/emmansun/gmsm' \
       -out "$TMP_DIR/verify-self.json" > "$TMP_DIR/verify-self.log" 2>&1; then
     pass "新库零主仓依赖（verify 模式 S1/S4/S6 全 PASS、S2/S3 主仓语义 SKIP；白名单仅 verify_golden_against_main.go）"
+    # 白名单可审计性：被跳过的文件数必须恒为 1（>1 说明白名单被人为扩大，须人工复核）
+    grep -E '^VERIFY_WHITELIST_SKIPPED_FILES=1' "$TMP_DIR/verify-self.log" > /dev/null \
+      || die "verify 白名单跳过数不为 1：$(grep 'VERIFY_WHITELIST_SKIPPED_FILES' "$TMP_DIR/verify-self.log" || echo '(无该行)')"
+    # _test.go 覆盖性：G1 的关键风险是随迁测试把主仓路径带进闭包，故必须确认测试文件纳入扫描
+    test_files_seen="$(sed -n 's/.*已覆盖 test_files=\([0-9][0-9]*\).*/\1/p' "$TMP_DIR/verify-self.log" | head -n 1)"
+    if [ -z "$test_files_seen" ] || [ "$test_files_seen" -le 0 ]; then
+      die "verify 模式未覆盖 _test.go（test_files=${test_files_seen:-未取到}），测试文件路径未被扫描"
+    fi
+    pass "verify 白名单跳过数=1 且 _test.go 已纳入扫描（test_files=$test_files_seen）"
   else
     die "新库存在主仓/gmsm import 前缀或 verify 自检失败：$(cat "$TMP_DIR/verify-self.log")"
   fi
