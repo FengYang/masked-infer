@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -137,6 +138,11 @@ func isNewRepoImport(p string) bool {
 	return strings.HasPrefix(p, "github.com/FengYang/masked-infer") || strings.HasSuffix(p, "/masked-infer")
 }
 
+// importPathOf 从 AST ImportSpec 取出去除引号后的 import 路径（语法级，不用正则）。
+func importPathOf(spec *ast.ImportSpec) (string, error) {
+	return strconv.Unquote(spec.Path.Value)
+}
+
 func scan(root, mode string) (*Report, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -209,7 +215,7 @@ func scan(root, mode string) (*Report, error) {
 			return nil
 		}
 		for _, spec := range file.Imports {
-			importPath, err := strconv.Unquote(spec.Path.Value)
+			importPath, err := importPathOf(spec)
 			if err != nil {
 				report.ParseFailures = append(report.ParseFailures,
 					fmt.Sprintf("%s: unquote import %q: %v", rel, spec.Path.Value, err))
