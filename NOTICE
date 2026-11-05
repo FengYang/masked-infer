@@ -6,7 +6,7 @@ NOTICE — masked-infer
 一、许可证文本来源
   LICENSE 为 Apache License 2.0 全文（无附加附录）；本库实际依赖以 go.mod、SBOM/cdx.json 与本节枚举为准。
 
-二、第三方依赖枚举（§5 阶段 0）
+二、第三方依赖枚举
   无第三方依赖。
   - go.mod 仅含 module 与 go 指令，零 require 块、零 replace；
   - 全部 Go 源码仅使用 Go 标准库；
@@ -19,8 +19,9 @@ NOTICE — masked-infer
   （见 scripts/verify_all.sh 本地静态段）。
 
 四、受控双份与变更管控
-  cipher/mask 为受控双份：主仓包原样保留，本库阶段 1 自带 masklite（纯标准库）。
-  本阶段（阶段 0）尚无 masklite 源码，仅有 G2 golden 向量。
+  cipher/mask 为受控双份：主仓包原样保留，本库自带 masklite（纯标准库实现，阶段 1 / CA-1）。
+  masklite 与主仓 cipher/mask 的等价性由 G2 golden 向量逐字节锁定
+  （masklite/testdata/stream.golden，由 scripts/gen_stream_golden.go 生成）。
   主仓 cipher/mask 的 Stream / hmacPRG / Next 一旦变更，须重跑
   scripts/gen_stream_golden.go 并同步 masklite/testdata/stream.golden，
   golden 变更由两侧同批评审。

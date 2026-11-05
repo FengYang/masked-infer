@@ -28,3 +28,6 @@ syft packages dir:. -o cyclonedx-json@1.5 > SBOM/cdx.json
 4. G1 门禁（`scripts/gate_g1.sh`）零命中；
 5. 本文件为阶段 0 基线快照；阶段 1–4 引入任何第三方依赖时必须同步更新 NOTICE/SBOM，
    并在发布前由工具重生成，禁止沿用本基线冒充发布产物。
+
+> 阶段 1 补充：迁入的 5 个包与 `masklite` 全部只用 Go 标准库，`go.mod` 仍零 `require`，
+> 故 `cdx.json` 的 `components` 保持 `[]`，本阶段**未改动** `cdx.json`。

@@ -10,28 +10,25 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 
 ## 状态
 
-- **§5 阶段 0 骨架；契约期已完成；阶段 1–4 待执行。**
+- **阶段 0 骨架与阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）已完成；阶段 2–4 待执行。**
 - 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取主仓 origin 所属账号
   `FengYang`，CI 变量 `SUB_ORG` 可覆写（见方案 §7）。
 - `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
-- 本阶段**零 CA 代码动作**：`core/`、`plan/`、`ref/`、`demo/`、`adapterkit/`、
-  `adapters/`、`masklite/`、`step/`、`backend/` 均无 `.go` 源码；
-  `masklite/testdata/` 仅有 G2 golden 向量。
 - 仓库只做本地 commit 留痕：无 remote、无 tag、未推送任何远端。
 
-## 模块边界（阶段 1–4 迁入，本阶段仅登记）
+## 模块边界与落地状态
 
-| 目录 | 职责 |
-|---|---|
-| `core/` | 纯计算内核（QuantizedMatrix / CipherLinear / MaskImage / Unmask / Decode / int128·Mod64），含 CUDA / 昇腾 dlopen 后端 |
-| `plan/` | TensorKey + 权重构建 |
-| `ref/` | 去量化参照前向（数值对拍基准） |
-| `demo/` | 合成小模型演示 |
-| `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops |
-| `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） |
-| `masklite/` | 纯标准库掩码流（CA-1，阶段 1）；本阶段仅 `testdata/stream.golden` |
-| `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） |
-| `backend/` | `MaskedInferenceBackend` 接口与构造器（方案 §4.2，接口定义在新库侧） |
+| 目录 | 职责 | 落地状态 |
+|---|---|---|
+| `core/` | 纯计算内核（QuantizedMatrix / CipherLinear / MaskImage / Unmask / Decode / int128·Mod64），含 CUDA / 昇腾 dlopen 后端 | 已落地（阶段 1）：10 个 `.go` + `.h` / `.cu` / `.cpp` 各 1 |
+| `plan/` | TensorKey + 权重构建 | 已落地（阶段 1）：8 个 `.go` |
+| `ref/` | 去量化参照前向（数值对拍基准） | 待迁移（阶段 2） |
+| `demo/` | 合成小模型演示 | 已落地（阶段 1）：4 个 `.go` |
+| `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops | 规划中，尚未建包 |
+| `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地（阶段 1）：12 个 `.go` |
+| `masklite/` | 纯标准库掩码流（CA-1） | 已落地（阶段 1）：`masklite.go` / `memzero.go` / `masklite_test.go` + `testdata/stream.golden` |
+| `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） | 待迁移（阶段 3） |
+| `backend/` | `MaskedInferenceBackend` 接口与构造器（方案 §4.2，接口定义在新库侧） | 待建（阶段 4） |
 
 ## 依赖方向与固定不变量
 
@@ -54,9 +51,10 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
   `github.com/<org>/security-ai-gateway/` 前缀与 `github.com/emmansun/gmsm` 命中。
 - **G2**（阶段 1 起常驻）：`masklite` 单测对 `masklite/testdata/stream.golden` 逐字节断言；
   真机侧 `scripts/verify_golden_against_main.go` 引用主仓 `cipher/mask.NewStreamDomain` 复核。
-  阶段 0 仅落地 golden 向量，不创建 `masklite/*.go`。
+  阶段 1 起 `masklite/*.go` 已落地，G2 由单元测试常驻守护，不再只是向量文件。
 - `.github/workflows/ci.yml`：所有 job 显式 `GOWORK=off`，Go `1.26.0`；
-  `g1` / `g2` / `build`（CGO_ENABLED 0/1）/ `accel`（cuda + ascend，🖥 待环境就绪，本轮禁用）四个 job。
+  `g1` / `g2` / `test`（`go vet` + `go test`）/ `build`（CGO_ENABLED 0/1）/
+  `accel`（cuda + ascend，🖥 待环境就绪，本轮禁用）五个 job。
 - **复验脚本分层（跨 §5 全部阶段共用，非阶段 0 专用、不另写新脚本）**：
   `bash scripts/verify_all.sh` 是**本地静态段（默认）**，适用阶段 0–4 全部阶段，覆盖
   gofmt / G1 逻辑自检 / import 闭包三项真门禁 / 国密红线 / 许可自洽 / 仓库可 clone 留证，
@@ -65,7 +63,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 - `bash scripts/verify_all.sh -remote` 是 **§5.1 门控 1–5 的共用真机入口**（阶段 1/3/4 复用
   同一脚本同一段），**仅在阶段 1+ 且 Go 1.26 真机可用时执行**：新库侧 `GOWORK=off`、
   主仓侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
-- **阶段 0 只跑静态段**：真机段（空模块 go build、G1 真机判绿、cgo/!cgo 与 CUDA/昇腾双构建、
+- **阶段 0 / 1 只跑静态段**：真机段（`go build`、G1 真机判绿、cgo/!cgo 与 CUDA/昇腾双构建、
   门控 1–5）一律标「🖥 待环境就绪（未取证）」；静态段 `[STATIC-PASS]` 不得冒充门控判绿。
 
 ## 联调说明
@@ -96,14 +94,21 @@ code only; the service form is decided by the integrating party.
 
 ### Status
 
-- **§5 Stage 0 skeleton; contract phase complete; Stages 1–4 pending.**
+- **Stage 0 skeleton and Stage 1 (CA-1 / CA-2 decoupling plus the 5-package
+  migration) are complete; Stages 2–4 are pending.**
 - Module path `github.com/FengYang/masked-infer`; `<org>` defaults to `FengYang`
   (owner of the main repository origin) and can be overridden by CI variable `SUB_ORG`.
 - `go 1.26.0`; `go.mod` has zero `require`, zero `replace`, zero third-party dependencies.
-- **No CA code actions in this stage**: `core/`, `plan/`, `ref/`, `demo/`,
-  `adapterkit/`, `adapters/`, `masklite/`, `step/`, `backend/` contain no `.go`
-  sources; only the G2 golden vectors live under `masklite/testdata/`.
 - Local-only commit: no remote, no tag, nothing pushed.
+
+### Package boundaries and landing status
+
+Landed in Stage 1: `core/` (10 `.go` files plus one each of `.h` / `.cu` / `.cpp`),
+`core/trustedops/` (7 `.go`), `plan/` (8 `.go`), `demo/` (4 `.go`),
+`adapters/qwen/` (12 `.go`) and `masklite/` (`masklite.go`, `memzero.go`,
+`masklite_test.go` plus `testdata/stream.golden`).
+Still pending: `ref/` (Stage 2), `step/` (Stage 3) and `backend/` (Stage 4).
+`adapterkit/` is planned but not created yet.
 
 ### Boundaries and invariants
 
@@ -131,16 +136,16 @@ code only; the service form is decided by the integrating party.
   byte-for-byte; the real-machine tool `scripts/verify_golden_against_main.go`
   cross-checks against the gateway's `cipher/mask.NewStreamDomain`.
 - CI: `.github/workflows/ci.yml`, all jobs set `GOWORK=off`, Go `1.26.0`,
-  with `g1`, `g2`, `build` (CGO_ENABLED 0/1) and `accel` (cuda + ascend,
-  🖥 environment-pending, disabled in this round) jobs.
+  with `g1`, `g2`, `test` (`go vet` + `go test`), `build` (CGO_ENABLED 0/1) and
+  `accel` (cuda + ascend, 🖥 environment-pending, disabled in this round) jobs.
 - One verification script, shared across all stages (not Stage-0-only, no separate
   script): `bash scripts/verify_all.sh` runs the local static segment by default
   (valid for every stage, results tagged `[STATIC-PASS]`); the `-baseline` mode
   re-checks the import-closure counters before Stage 3/4 import rewrites;
   `bash scripts/verify_all.sh -remote` is the shared entry point for §5.1 gates 1–5,
-  executable only from Stage 1 onward with a Go 1.26 machine. Stage 0 runs the static
-  segment only; every machine-side item remains 🖥 environment-pending (no evidence
-  collected), and `[STATIC-PASS]` must never be read as a gate 1–5 pass.
+  executable only from Stage 1 onward with a Go 1.26 machine. Stages 0 and 1 run the
+  static segment only; every machine-side item remains 🖥 environment-pending (no
+  evidence collected), and `[STATIC-PASS]` must never be read as a gate 1–5 pass.
 
 ### Workspace note
 
