@@ -19,8 +19,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 MAIN_REPO="${MAIN_REPO:-$REPO_ROOT/../security-ai-gateway}"
-# 新库路径由主仓路径推导，不新增全局配置。
-SUB_REPO="${SUB_REPO:-$MAIN_REPO/../masked-infer}"
+# SUB_REPO 直接复用 REPO_ROOT：脚本位于 scripts/ 下，REPO_ROOT 即新库根 F:/方案/masked-infer。
+# （$MAIN_REPO/../masked-infer 亦可绕回同一路径，但直接复用最不易错；不新增全局配置。）
+SUB_REPO="${SUB_REPO:-$REPO_ROOT}"
 GOFMT="${GOFMT:-gofmt}"
 BASELINE_MODE=0
 if [ "${1:-}" = "-baseline" ] || [ "${VERIFY_BASELINE:-0}" = "1" ]; then
@@ -53,9 +54,13 @@ field() {
 assert_run() {
   local log="$1" label="$2"
   shift 2
+  local expected="$#" run_count name
   grep -q '^=== RUN' "$log" \
     || die "${label} 无测试实跑（禁止假 PASS：检查 -run 是否匹配到真实测试名）"
-  local name
+  # 覆盖度：实跑条数不得少于 -run 目标数，再逐个名字断言，防「只跑了一个也算过」。
+  run_count="$(grep -c '^=== RUN' "$log" || true)"
+  [ "$run_count" -ge "$expected" ] \
+    || die "${label} === RUN 实跑条数 ${run_count} < 目标数 ${expected}（禁止假 PASS）"
   for name in "$@"; do
     grep -qE "^=== RUN[[:space:]]+${name}$" "$log" \
       || die "${label} 缺少实跑测试 ${name}（禁止假 PASS）"
@@ -246,6 +251,41 @@ FAKEGO
   [ "$rc" -eq 0 ] || die "=== RUN 守卫在有 RUN 样本上误判"
   pass "=== RUN 守卫 fail-closed 自检（无 RUN 样本必失败 / 有 RUN 样本通过）"
 
+  # (k2) 双向验证：用**真实 go test -v** 哑测试（仅存于临时目录，trap 清理、不进仓库）
+  #   样本 A（-run 指向不存在的名字）→ 守卫必须判红，堵住假绿；
+  #   样本 B（-run 指向真实存在的名字）→ 守卫不得误判红，且 -v 输出确实含 === RUN。
+  #   形态固定为 `go test -v 2>&1 | tee <file>` 后**对文件 grep**：绝不把 grep -q 直接
+  #   接在管道末端（命中即关读端 → 上游 SIGPIPE(141) → pipefail 下「有匹配反被判红」）。
+  guard_pkg="$TMP_DIR/guard_pkg"
+  mkdir -p "$guard_pkg"
+  cat > "$guard_pkg/dummy_test.go" <<'DUMMYGO'
+package dummy
+
+import "testing"
+
+func TestGuardReal(t *testing.T) {
+	t.Log("guard positive sample")
+}
+DUMMYGO
+  # tee 仍落盘，但把它的 stdout 收进 /dev/null，避免哑测试的裸 PASS 字样混入静态段输出。
+  ( cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardReal$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_pos.log" ) >/dev/null \
+    || die "正向哑测试 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_pos.log")"
+  grep -qE '^=== RUN[[:space:]]+TestGuardReal$' "$TMP_DIR/guard_pos.log" \
+    || die "-v 未产生 === RUN（守卫链漏 -v）"
+  pos_run_count="$(grep -c '^=== RUN' "$TMP_DIR/guard_pos.log" || true)"
+  rc=0
+  ( assert_run "$TMP_DIR/guard_pos.log" "GUARD-POS" TestGuardReal ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || die "有匹配样本被守卫误判红（疑似 grep -q 直连管道导致 SIGPIPE 假红）"
+  ( cd "$guard_pkg" && GO111MODULE=off go test -run '^TestNoSuchName$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_neg.log" ) >/dev/null \
+    || die "无匹配哑测试 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_neg.log")"
+  neg_run_count="$(grep -c '^=== RUN' "$TMP_DIR/guard_neg.log" || true)"
+  rc=0
+  ( assert_run "$TMP_DIR/guard_neg.log" "GUARD-NEG" TestNoSuchName ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || die "-run 无匹配样本未被守卫判红（假绿通道未堵住）"
+  pass "=== RUN 守卫双向验证（真实 go test -v：有匹配 ${pos_run_count} 条 RUN 不误判红 / 无匹配 ${neg_run_count} 条 RUN 必判红；tee 落文件后 grep，无 SIGPIPE 假红）"
+
   # (l) 仓库可 clone 留证（只读，临时目录，不污染仓库）
   if [ -d .git ]; then
     [ "$(git rev-parse --is-inside-work-tree)" = "true" ] || die "非 git 工作树"
@@ -267,8 +307,12 @@ FAKEGO
 # ---------------------------------------------------------------------------
 # 🖥 真机段：本轮不执行（192.168.31.248 SSH 不可用 / 本机 go1.20.3；仅阶段 1+）
 #   - 新库侧全部 GOWORK=off；主仓侧必须在 go.work workspace 内，**勿加 GOWORK=off**
-#   - 门控 1–5 只有在本段实际跑通后才可判 PASS
-#   - 所有 go test -run 均接 -v + assert_run 的 === RUN 守卫，防「无匹配却 exit 0」恒假 PASS
+#   - 门控 1–5 只有在本段实际跑通后才可判 PASS；本段是阶段 1/3/4 共用的门控入口
+#   - 所有 go test -run 必须「-v + 2>&1 | tee <file>」，再对**文件**做 === RUN 守卫：
+#     * 漏 -v ⇒ 无 === RUN 输出 ⇒ 正常通过被误判红；
+#     * grep -q 直连管道 ⇒ 命中即关读端 ⇒ SIGPIPE(141) + pipefail ⇒ 有匹配反被误判红；
+#     * 两者都避开后，才能防「-run 无匹配却 exit 0」的恒假 PASS。
+#   - assert_run 同时断言实跑条数 >= -run 目标数并逐名核对，防「只跑一个也算过」
 # ---------------------------------------------------------------------------
 run_remote() {
   echo "== 🖥 真机段（Go 1.26 / 192.168.31.248；仅阶段 1+）=="
@@ -345,7 +389,7 @@ run_remote() {
     go run ../masked-infer/scripts/verify_golden_against_main.go \
       -golden ../masked-infer/masklite/testdata/stream.golden
   )
-  echo "🖥 真机段完成：门控 1–5 已实际取证"
+  echo "[REMOTE-PASS] 真机段完成：门控 1–5 已实际取证"
 }
 
 case "${1:-}" in
