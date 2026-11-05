@@ -104,7 +104,10 @@ type Report struct {
 	NewRepoCrossHits   []string            `json:"new_repo_cross_hits"`
 	ForbiddenPathHits  []string            `json:"forbidden_path_hits"`
 	ForbiddenPathFiles []string            `json:"forbidden_path_files_present"`
-	SelfChecks         []SelfCheck         `json:"self_checks"`
+	// ForbiddenPrefixHits 仅当传入 -forbid-prefix 且有命中时出现；
+	// omitempty 保证不带该参数时 JSON 与既有 baseline 字节级一致。
+	ForbiddenPrefixHits []string    `json:"forbidden_prefix_hits,omitempty"`
+	SelfChecks          []SelfCheck `json:"self_checks"`
 }
 
 func shouldSkipDir(name, path, root string) bool {
@@ -143,27 +146,28 @@ func importPathOf(spec *ast.ImportSpec) (string, error) {
 	return strconv.Unquote(spec.Path.Value)
 }
 
-func scan(root, mode string) (*Report, error) {
+func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
 	report := &Report{
-		Schema:             "masked-infer/import-closure-baseline/v1",
-		Mode:               mode,
-		Root:               absRoot,
-		SkipRules:          skipRules,
-		GroupKeys:          groupKeys,
-		GroupKeyPaths:      fullKeyPaths,
-		Groups:             make(map[string][]Hit, len(groupKeys)),
-		GroupHitCounts:     make(map[string]int, len(groupKeys)),
-		GroupFileCounts:    make(map[string]int, len(groupKeys)),
-		GroupOwnFiles:      make(map[string][]string, len(groupKeys)),
-		GroupOwnCounts:     make(map[string]int, len(groupKeys)),
-		ParseFailures:      []string{},
-		NewRepoCrossHits:   []string{},
-		ForbiddenPathHits:  []string{},
-		ForbiddenPathFiles: []string{},
+		Schema:              "masked-infer/import-closure-baseline/v1",
+		Mode:                mode,
+		Root:                absRoot,
+		SkipRules:           skipRules,
+		GroupKeys:           groupKeys,
+		GroupKeyPaths:       fullKeyPaths,
+		Groups:              make(map[string][]Hit, len(groupKeys)),
+		GroupHitCounts:      make(map[string]int, len(groupKeys)),
+		GroupFileCounts:     make(map[string]int, len(groupKeys)),
+		GroupOwnFiles:       make(map[string][]string, len(groupKeys)),
+		GroupOwnCounts:      make(map[string]int, len(groupKeys)),
+		ParseFailures:       []string{},
+		NewRepoCrossHits:    []string{},
+		ForbiddenPathHits:   []string{},
+		ForbiddenPathFiles:  []string{},
+		ForbiddenPrefixHits: []string{},
 	}
 	ownPrefixes := make(map[string]string, len(groupKeys))
 	for _, key := range groupKeys {
@@ -225,6 +229,12 @@ func scan(root, mode string) (*Report, error) {
 			if isNewRepoImport(importPath) {
 				report.NewRepoCrossHits = append(report.NewRepoCrossHits, fmt.Sprintf("%s: %s", rel, importPath))
 			}
+			for _, pfx := range forbidPrefixes {
+				if strings.HasPrefix(importPath, pfx) {
+					report.ForbiddenPrefixHits = append(report.ForbiddenPrefixHits,
+						fmt.Sprintf("%s: %s", rel, importPath))
+				}
+			}
 			for _, key := range groupKeys {
 				if strings.Contains(importPath, key) {
 					if isForbiddenPath(rel) || isForbiddenPath(importPath) {
@@ -271,6 +281,7 @@ func scan(root, mode string) (*Report, error) {
 	sort.Strings(report.NewRepoCrossHits)
 	sort.Strings(report.ForbiddenPathHits)
 	sort.Strings(report.ForbiddenPathFiles)
+	sort.Strings(report.ForbiddenPrefixHits)
 	return report, nil
 }
 
@@ -303,10 +314,22 @@ func evaluate(report *Report) {
 		report.TotalGoFiles, report.TotalTestGoFiles, report.TotalImportLines, report.TotalGroupHits)
 }
 
+// stringSliceFlag 支持可重复的 -forbid-prefix 参数。
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string { return strings.Join(*s, ",") }
+
+func (s *stringSliceFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
 func main() {
 	root := flag.String("root", "", "扫描根目录（必填，通常为主仓根目录）")
 	mode := flag.String("mode", "baseline", "扫描模式：本阶段仅实现 baseline")
 	out := flag.String("out", "", "落盘 JSON 基线报告路径（可选）")
+	var forbidPrefixes stringSliceFlag
+	flag.Var(&forbidPrefixes, "forbid-prefix", "禁用的 import 前缀（可重复），命中项写入 forbidden_prefix_hits")
 	flag.Parse()
 
 	if *root == "" {
@@ -318,7 +341,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	report, err := scan(*root, *mode)
+	report, err := scan(*root, *mode, forbidPrefixes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "check_import_closure: %v\n", err)
 		os.Exit(1)

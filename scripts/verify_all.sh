@@ -156,7 +156,10 @@ FAKEGO
   #   阶段 3/4 import 改写前须用 -baseline 复核；基线确认漂移时用工具显式重生成
   #   scripts/closure-baseline.json 并提交，两侧同批评审。
   if [ -d "$MAIN_REPO" ]; then
-    GO111MODULE=off go run scripts/check_import_closure.go \
+    # WARN-10：先 go build 到临时可执行文件再执行，去掉对 `go run` 临时目录执行权限的依赖。
+    GO111MODULE=off go build -o "$TMP_DIR/cic" scripts/check_import_closure.go \
+      || die "check_import_closure.go 构建失败"
+    "$TMP_DIR/cic" \
       -root "$MAIN_REPO" -mode baseline -out "$TMP_DIR/closure-recheck.json" \
       > "$TMP_DIR/closure-recheck.log" 2>&1 || die "闭包扫描失败: $(cat "$TMP_DIR/closure-recheck.log")"
     for key in parse_failures forbidden_path_hits new_repo_cross_hits; do
@@ -385,9 +388,9 @@ run_remote() {
     # 门控 4：主仓全量 build/vet/test + SBOM gate 不回归（已在上方执行），
     #         发布前另按 SBOM/README.md 重生成并复核。
 
-    # 门控 5：G2 golden 与主仓 NewStreamDomain 逐字节一致
-    go run ../masked-infer/scripts/verify_golden_against_main.go \
-      -golden ../masked-infer/masklite/testdata/stream.golden
+    # 门控 5：G2 golden 与主仓 NewStreamDomain 逐字节一致（去硬编码，用 $SUB_REPO）
+    go run "$SUB_REPO/scripts/verify_golden_against_main.go" \
+      -golden "$SUB_REPO/masklite/testdata/stream.golden"
   )
   echo "[REMOTE-PASS] 真机段完成：门控 1–5 已实际取证"
 }
