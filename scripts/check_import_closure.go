@@ -104,9 +104,9 @@ type Report struct {
 	NewRepoCrossHits   []string            `json:"new_repo_cross_hits"`
 	ForbiddenPathHits  []string            `json:"forbidden_path_hits"`
 	ForbiddenPathFiles []string            `json:"forbidden_path_files_present"`
-	// ForbiddenPrefixHits 仅当传入 -forbid-prefix 且有命中时出现；
-	// omitempty 保证不带该参数时 JSON 与既有 baseline 字节级一致。
-	ForbiddenPrefixHits []string    `json:"forbidden_prefix_hits,omitempty"`
+	// ForbiddenPrefixHits：未传 -forbid-prefix 时为 nil → omitempty 省略（保持 baseline 字节一致）；
+	// 传了则始终输出数组（零命中为 []），供 verify 模式机械断言「S6 零命中」。
+	ForbiddenPrefixHits *[]string   `json:"forbidden_prefix_hits,omitempty"`
 	SelfChecks          []SelfCheck `json:"self_checks"`
 }
 
@@ -152,22 +152,27 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 		return nil, err
 	}
 	report := &Report{
-		Schema:              "masked-infer/import-closure-baseline/v1",
-		Mode:                mode,
-		Root:                absRoot,
-		SkipRules:           skipRules,
-		GroupKeys:           groupKeys,
-		GroupKeyPaths:       fullKeyPaths,
-		Groups:              make(map[string][]Hit, len(groupKeys)),
-		GroupHitCounts:      make(map[string]int, len(groupKeys)),
-		GroupFileCounts:     make(map[string]int, len(groupKeys)),
-		GroupOwnFiles:       make(map[string][]string, len(groupKeys)),
-		GroupOwnCounts:      make(map[string]int, len(groupKeys)),
-		ParseFailures:       []string{},
-		NewRepoCrossHits:    []string{},
-		ForbiddenPathHits:   []string{},
-		ForbiddenPathFiles:  []string{},
-		ForbiddenPrefixHits: []string{},
+		Schema:             "masked-infer/import-closure-baseline/v1",
+		Mode:               mode,
+		Root:               absRoot,
+		SkipRules:          skipRules,
+		GroupKeys:          groupKeys,
+		GroupKeyPaths:      fullKeyPaths,
+		Groups:             make(map[string][]Hit, len(groupKeys)),
+		GroupHitCounts:     make(map[string]int, len(groupKeys)),
+		GroupFileCounts:    make(map[string]int, len(groupKeys)),
+		GroupOwnFiles:      make(map[string][]string, len(groupKeys)),
+		GroupOwnCounts:     make(map[string]int, len(groupKeys)),
+		ParseFailures:      []string{},
+		NewRepoCrossHits:   []string{},
+		ForbiddenPathHits:  []string{},
+		ForbiddenPathFiles: []string{},
+	}
+	// 仅当传了 -forbid-prefix 才分配（nil 时 omitempty 省略以保持 baseline 字节一致；
+	// 非 nil 则始终输出数组，零命中为 []，供 verify 模式机械断言）。
+	if len(forbidPrefixes) > 0 {
+		empty := []string{}
+		report.ForbiddenPrefixHits = &empty
 	}
 	ownPrefixes := make(map[string]string, len(groupKeys))
 	for _, key := range groupKeys {
@@ -197,6 +202,12 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		// verify 模式跳过唯一白名单：真机复核工具 verify_golden_against_main.go 必须 import 主仓
+		// cipher/mask（在 worktree 内以主仓 module 运行），故不计入新库「零主仓依赖」判定。
+		if mode == "verify" && rel == "scripts/verify_golden_against_main.go" {
+			fmt.Printf("SKIP whitelist (verify mode): %s（真机复核工具，唯一白名单，须 import 主仓 cipher/mask）\n", rel)
+			return nil
+		}
 		report.TotalGoFiles++
 		for key, prefix := range ownPrefixes {
 			if strings.HasPrefix(rel, prefix) {
@@ -229,10 +240,12 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 			if isNewRepoImport(importPath) {
 				report.NewRepoCrossHits = append(report.NewRepoCrossHits, fmt.Sprintf("%s: %s", rel, importPath))
 			}
-			for _, pfx := range forbidPrefixes {
-				if strings.HasPrefix(importPath, pfx) {
-					report.ForbiddenPrefixHits = append(report.ForbiddenPrefixHits,
-						fmt.Sprintf("%s: %s", rel, importPath))
+			if report.ForbiddenPrefixHits != nil {
+				for _, pfx := range forbidPrefixes {
+					if strings.HasPrefix(importPath, pfx) {
+						*report.ForbiddenPrefixHits = append(*report.ForbiddenPrefixHits,
+							fmt.Sprintf("%s: %s", rel, importPath))
+					}
 				}
 			}
 			for _, key := range groupKeys {
@@ -281,7 +294,9 @@ func scan(root, mode string, forbidPrefixes []string) (*Report, error) {
 	sort.Strings(report.NewRepoCrossHits)
 	sort.Strings(report.ForbiddenPathHits)
 	sort.Strings(report.ForbiddenPathFiles)
-	sort.Strings(report.ForbiddenPrefixHits)
+	if report.ForbiddenPrefixHits != nil {
+		sort.Strings(*report.ForbiddenPrefixHits)
+	}
 	return report, nil
 }
 
@@ -296,22 +311,38 @@ func evaluate(report *Report) {
 	add("S1", len(report.ParseFailures) == 0,
 		"语法解析零失败（parse_failures=%d, go_files=%d）", len(report.ParseFailures), report.TotalGoFiles)
 
-	closed := len(report.GroupKeys) == len(groupKeys) && len(report.Groups) == len(groupKeys)
-	for _, key := range groupKeys {
-		if _, ok := report.Groups[key]; !ok {
-			closed = false
+	if report.Mode == "verify" {
+		// S2/S3 均为主仓专属语义；新库 verify 模式明确打印 SKIP（不静默，避免被误读为通过）。
+		fmt.Println("S2 SKIP (verify mode: 闭集分组为主仓语义，新库不适用)")
+		fmt.Println("S3 SKIP (verify mode: new_repo_cross_hits 判「主仓是否 import 新库」，新库自扫恒真，不适用)")
+	} else {
+		closed := len(report.GroupKeys) == len(groupKeys) && len(report.Groups) == len(groupKeys)
+		for _, key := range groupKeys {
+			if _, ok := report.Groups[key]; !ok {
+				closed = false
+			}
 		}
+		add("S2", closed, "闭集分组数=%d（8 个被迁出包 + cipher/mask），全部键在预定义闭集内", len(report.Groups))
+		add("S3", len(report.NewRepoCrossHits) == 0,
+			"与新库零交叉（new_repo_cross_hits=%d）", len(report.NewRepoCrossHits))
 	}
-	add("S2", closed, "闭集分组数=%d（8 个被迁出包 + cipher/mask），全部键在预定义闭集内", len(report.Groups))
 
-	add("S3", len(report.NewRepoCrossHits) == 0,
-		"与新库零交叉（new_repo_cross_hits=%d）", len(report.NewRepoCrossHits))
 	add("S4", len(report.ForbiddenPathHits) == 0,
 		"禁碰路径零命中：import 改写候选落禁碰路径=%d（只读盘点到的禁碰文件数=%d，不计失败）",
 		len(report.ForbiddenPathHits), len(report.ForbiddenPathFiles))
 	add("S5", report.TotalImportLines >= 0 && report.TotalGroupHits >= 0,
 		"汇总计数 go_files=%d test_files=%d import_lines=%d group_hits=%d",
 		report.TotalGoFiles, report.TotalTestGoFiles, report.TotalImportLines, report.TotalGroupHits)
+
+	if report.Mode == "verify" {
+		// S6（verify 核心门禁）：禁用前缀零命中，且必须真的传了 -forbid-prefix。
+		if report.ForbiddenPrefixHits == nil {
+			add("S6", false, "S6 失败：verify 模式未传 -forbid-prefix，无法判定零命中")
+		} else {
+			add("S6", len(*report.ForbiddenPrefixHits) == 0,
+				"禁用前缀零命中（forbidden_prefix_hits=%d）", len(*report.ForbiddenPrefixHits))
+		}
+	}
 }
 
 // stringSliceFlag 支持可重复的 -forbid-prefix 参数。
@@ -326,7 +357,7 @@ func (s *stringSliceFlag) Set(v string) error {
 
 func main() {
 	root := flag.String("root", "", "扫描根目录（必填，通常为主仓根目录）")
-	mode := flag.String("mode", "baseline", "扫描模式：本阶段仅实现 baseline")
+	mode := flag.String("mode", "baseline", "扫描模式：baseline（主仓基线）| verify（新库零依赖核验）")
 	out := flag.String("out", "", "落盘 JSON 基线报告路径（可选）")
 	var forbidPrefixes stringSliceFlag
 	flag.Var(&forbidPrefixes, "forbid-prefix", "禁用的 import 前缀（可重复），命中项写入 forbidden_prefix_hits")
@@ -336,8 +367,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "check_import_closure: -root is required")
 		os.Exit(2)
 	}
-	if *mode != "baseline" {
-		fmt.Fprintf(os.Stderr, "check_import_closure: mode %q not implemented in stage 0 (only baseline)\n", *mode)
+	if *mode != "baseline" && *mode != "verify" {
+		fmt.Fprintf(os.Stderr, "check_import_closure: mode %q not implemented (baseline|verify)\n", *mode)
 		os.Exit(2)
 	}
 

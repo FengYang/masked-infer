@@ -182,6 +182,21 @@ FAKEGO
     skip "主仓目录不存在，跳过闭包复核（CI GOWORK=off 场景）"
   fi
 
+  # (e2) 新库零主仓依赖核验（verify 模式常驻门禁；go1.20 可跑）
+  #   产品代码不得出现主仓/gmsm import 前缀；唯一白名单 scripts/verify_golden_against_main.go
+  #   由工具在 verify 模式显式跳过（真机复核工具须 import 主仓 cipher/mask）。S2/S3 主仓语义 SKIP。
+  GO111MODULE=off go build -o "$TMP_DIR/cic" scripts/check_import_closure.go \
+    || die "check_import_closure.go 构建失败"
+  if "$TMP_DIR/cic" -root "$REPO_ROOT" -mode verify \
+      -forbid-prefix 'security-ai-gateway/' \
+      -forbid-prefix 'github.com/FengYang/security-ai-gateway/' \
+      -forbid-prefix 'github.com/emmansun/gmsm' \
+      -out "$TMP_DIR/verify-self.json" > "$TMP_DIR/verify-self.log" 2>&1; then
+    pass "新库零主仓依赖（verify 模式 S1/S4/S6 全 PASS、S2/S3 主仓语义 SKIP；白名单仅 verify_golden_against_main.go）"
+  else
+    die "新库存在主仓/gmsm import 前缀或 verify 自检失败：$(cat "$TMP_DIR/verify-self.log")"
+  fi
+
   # (f) 国密红线：新库零 SM2/SM3/SM4 自实现
   if grep -rE --exclude-dir=.git 'func sm[234]' . > "$TMP_DIR/sm_hits.txt"; then
     die "国密红线命中: $(cat "$TMP_DIR/sm_hits.txt")"
