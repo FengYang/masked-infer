@@ -1,0 +1,765 @@
+{
+  "schema": "masked-infer/import-closure-baseline/v1",
+  "mode": "baseline",
+  "root": "F:\\方案\\security-ai-gateway",
+  "skip_rules": [
+    "跳过目录 .git",
+    "跳过目录 vendor / node_modules",
+    "跳过所有隐藏目录（.tools / .gopath-p24 等工具链缓存，非主仓源码）",
+    "仅扫描 *.go；_test.go 单独计数但同样计入闭包",
+    "只读：不写入被扫描仓库"
+  ],
+  "group_keys": [
+    "gateway/teecore/maskedinfer",
+    "trustedops",
+    "route2plan",
+    "route2ref",
+    "route2demo",
+    "adapters/qwen",
+    "gateway/tee-infer-service/route2step",
+    "cmd/route2-client",
+    "cipher/mask"
+  ],
+  "group_key_paths": {
+    "adapters/qwen": "gateway/teecore/adapters/qwen",
+    "cipher/mask": "cipher/mask",
+    "cmd/route2-client": "cmd/route2-client",
+    "gateway/tee-infer-service/route2step": "gateway/tee-infer-service/route2step",
+    "gateway/teecore/maskedinfer": "gateway/teecore/maskedinfer",
+    "route2demo": "gateway/teecore/route2demo",
+    "route2plan": "gateway/teecore/route2plan",
+    "route2ref": "gateway/teecore/route2ref",
+    "trustedops": "gateway/teecore/trustedops"
+  },
+  "total_go_files": 1072,
+  "total_test_go_files": 536,
+  "total_import_lines": 5875,
+  "total_group_hits": 93,
+  "parse_failures": [],
+  "groups": {
+    "adapters/qwen": [
+      {
+        "file": "cmd/route2-qwen/main.go",
+        "line": 29,
+        "import_path": "security-ai-gateway/gateway/teecore/adapters/qwen"
+      },
+      {
+        "file": "gateway/route2/orchestrator/form_a_test.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/adapters/qwen"
+      },
+      {
+        "file": "gateway/tee-infer-service/state_machine.go",
+        "line": 25,
+        "import_path": "security-ai-gateway/gateway/teecore/adapters/qwen"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/route2step_golden_test.go",
+        "line": 26,
+        "import_path": "security-ai-gateway/gateway/teecore/adapters/qwen"
+      }
+    ],
+    "cipher/mask": [
+      {
+        "file": "cmd/route2-client/main.go",
+        "line": 49,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/cryptopsvc/server.go",
+        "line": 29,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/poc/linear-mask-poc/main.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/e2e/main.go",
+        "line": 17,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/e2e/precision/main.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/m9_integration_test.go",
+        "line": 18,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/main.go",
+        "line": 28,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/step_exec.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/tee-infer-service/security_test.go",
+        "line": 13,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/route2step_golden_test.go",
+        "line": 24,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "gateway/teecore/maskedinfer/multilayer_masked_test.go",
+        "line": 16,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "secagg/party.go",
+        "line": 15,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "tmp_bak_step5/main.go",
+        "line": 27,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "tmp_bak_step5/recompute.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/cipher/mask"
+      },
+      {
+        "file": "tmp_bak_step5/step_exec.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/cipher/mask"
+      }
+    ],
+    "cmd/route2-client": [],
+    "gateway/tee-infer-service/route2step": [
+      {
+        "file": "gateway/tee-infer-service/recompute_v2_test.go",
+        "line": 15,
+        "import_path": "security-ai-gateway/gateway/tee-infer-service/route2step"
+      },
+      {
+        "file": "gateway/tee-infer-service/state_machine.go",
+        "line": 24,
+        "import_path": "security-ai-gateway/gateway/tee-infer-service/route2step"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/route2step_golden_test.go",
+        "line": 25,
+        "import_path": "security-ai-gateway/gateway/tee-infer-service/route2step"
+      }
+    ],
+    "gateway/teecore/maskedinfer": [
+      {
+        "file": "cmd/route2-client/main.go",
+        "line": 51,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "cmd/route2-qwen/main.go",
+        "line": 30,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/route2/orchestrator/adapter.go",
+        "line": 10,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/route2/orchestrator/adapter_stub_test.go",
+        "line": 6,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/route2/orchestrator/form_a_test.go",
+        "line": 8,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/route2/orchestrator/otp.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_m1_test.go",
+        "line": 18,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_v2_test.go",
+        "line": 16,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/step_exec.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/adapter.go",
+        "line": 3,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/forward.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter.go",
+        "line": 6,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter_test.go",
+        "line": 6,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/synthetic.go",
+        "line": 6,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/weights.go",
+        "line": 9,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/route2demo/model_weights.go",
+        "line": 9,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/route2demo/model_weights_test.go",
+        "line": 9,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "gateway/teecore/route2demo/weights.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "tmp_bak_step5/recompute.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      },
+      {
+        "file": "tmp_bak_step5/step_exec.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/maskedinfer"
+      }
+    ],
+    "route2demo": [
+      {
+        "file": "cmd/route2-client/main.go",
+        "line": 52,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "cmd/route2-client/main_test.go",
+        "line": 17,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute.go",
+        "line": 22,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_v2_test.go",
+        "line": 17,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/step_exec.go",
+        "line": 22,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/tee-infer-service/state_machine.go",
+        "line": 26,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter_test.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward.go",
+        "line": 42,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward_test.go",
+        "line": 9,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "tmp_bak_step5/recompute.go",
+        "line": 22,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "tmp_bak_step5/state_machine.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      },
+      {
+        "file": "tmp_bak_step5/step_exec.go",
+        "line": 22,
+        "import_path": "security-ai-gateway/gateway/teecore/route2demo"
+      }
+    ],
+    "route2plan": [
+      {
+        "file": "cmd/route2-client/main.go",
+        "line": 53,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "cmd/route2-client/main_test.go",
+        "line": 18,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/m9_integration_test.go",
+        "line": 21,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_m1_test.go",
+        "line": 19,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_ops_test.go",
+        "line": 14,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_v2_test.go",
+        "line": 18,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/backend_test.go",
+        "line": 11,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/gqa_test.go",
+        "line": 7,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/kvcache.go",
+        "line": 25,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/kvcache_test.go",
+        "line": 10,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/step_exec.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/state_machine.go",
+        "line": 27,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/tee-infer-service/state_machine_model_test.go",
+        "line": 13,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter.go",
+        "line": 8,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/model_adapter_test.go",
+        "line": 8,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/route2step_golden_test.go",
+        "line": 27,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/route2demo/embedding_test.go",
+        "line": 11,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/route2demo/model_weights.go",
+        "line": 10,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/route2demo/model_weights_test.go",
+        "line": 10,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward.go",
+        "line": 43,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward_test.go",
+        "line": 10,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "tmp_bak_step5/kvcache.go",
+        "line": 25,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "tmp_bak_step5/recompute.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "tmp_bak_step5/state_machine.go",
+        "line": 24,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      },
+      {
+        "file": "tmp_bak_step5/step_exec.go",
+        "line": 23,
+        "import_path": "security-ai-gateway/gateway/teecore/route2plan"
+      }
+    ],
+    "route2ref": [
+      {
+        "file": "cmd/route2-client/main.go",
+        "line": 54,
+        "import_path": "security-ai-gateway/gateway/teecore/route2ref"
+      }
+    ],
+    "trustedops": [
+      {
+        "file": "gateway/modelengine/demo.go",
+        "line": 11,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_m1_test.go",
+        "line": 20,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/tee-infer-service/recompute_ops_test.go",
+        "line": 15,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/tee-infer-service/route2step/step_exec.go",
+        "line": 24,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/teecore/adapters/qwen/forward.go",
+        "line": 8,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/teecore/maskedinfer/multilayer_masked_test.go",
+        "line": 17,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward.go",
+        "line": 44,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "gateway/teecore/route2ref/plain_forward_test.go",
+        "line": 11,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      },
+      {
+        "file": "tmp_bak_step5/step_exec.go",
+        "line": 24,
+        "import_path": "security-ai-gateway/gateway/teecore/trustedops"
+      }
+    ]
+  },
+  "group_hit_counts": {
+    "adapters/qwen": 4,
+    "cipher/mask": 16,
+    "cmd/route2-client": 0,
+    "gateway/tee-infer-service/route2step": 3,
+    "gateway/teecore/maskedinfer": 21,
+    "route2demo": 13,
+    "route2plan": 26,
+    "route2ref": 1,
+    "trustedops": 9
+  },
+  "group_file_counts": {
+    "adapters/qwen": 4,
+    "cipher/mask": 16,
+    "cmd/route2-client": 0,
+    "gateway/tee-infer-service/route2step": 3,
+    "gateway/teecore/maskedinfer": 21,
+    "route2demo": 13,
+    "route2plan": 26,
+    "route2ref": 1,
+    "trustedops": 9
+  },
+  "group_own_files": {
+    "adapters/qwen": [
+      "gateway/teecore/adapters/qwen/adapter.go",
+      "gateway/teecore/adapters/qwen/config.go",
+      "gateway/teecore/adapters/qwen/forward.go",
+      "gateway/teecore/adapters/qwen/forward_test.go",
+      "gateway/teecore/adapters/qwen/model_adapter.go",
+      "gateway/teecore/adapters/qwen/model_adapter_test.go",
+      "gateway/teecore/adapters/qwen/realweights_test.go",
+      "gateway/teecore/adapters/qwen/route2step_golden_test.go",
+      "gateway/teecore/adapters/qwen/safetensors.go",
+      "gateway/teecore/adapters/qwen/synthetic.go",
+      "gateway/teecore/adapters/qwen/tokenizer.go",
+      "gateway/teecore/adapters/qwen/tokenizer_test.go",
+      "gateway/teecore/adapters/qwen/weights.go"
+    ],
+    "cipher/mask": [
+      "cipher/mask/mask.go",
+      "cipher/mask/mask_test.go",
+      "cipher/mask/prg_test.go"
+    ],
+    "cmd/route2-client": [
+      "cmd/route2-client/main.go",
+      "cmd/route2-client/main_test.go"
+    ],
+    "gateway/tee-infer-service/route2step": [
+      "gateway/tee-infer-service/route2step/backend.go",
+      "gateway/tee-infer-service/route2step/backend_test.go",
+      "gateway/tee-infer-service/route2step/batchrow.go",
+      "gateway/tee-infer-service/route2step/errors.go",
+      "gateway/tee-infer-service/route2step/gqa_test.go",
+      "gateway/tee-infer-service/route2step/kvcache.go",
+      "gateway/tee-infer-service/route2step/kvcache_test.go",
+      "gateway/tee-infer-service/route2step/route2_layout_test.go",
+      "gateway/tee-infer-service/route2step/step_exec.go"
+    ],
+    "gateway/teecore/maskedinfer": [
+      "gateway/teecore/maskedinfer/accel_dispatch.go",
+      "gateway/teecore/maskedinfer/accel_dispatch_nocgo.go",
+      "gateway/teecore/maskedinfer/accel_dispatch_test.go",
+      "gateway/teecore/maskedinfer/int128_linear.go",
+      "gateway/teecore/maskedinfer/int128_linear_test.go",
+      "gateway/teecore/maskedinfer/masked_linear.go",
+      "gateway/teecore/maskedinfer/masked_linear_fastpath_test.go",
+      "gateway/teecore/maskedinfer/masked_linear_test.go",
+      "gateway/teecore/maskedinfer/multilayer_masked_test.go",
+      "gateway/teecore/maskedinfer/real_mlp_fixture_test.go"
+    ],
+    "route2demo": [
+      "gateway/teecore/route2demo/embedding_test.go",
+      "gateway/teecore/route2demo/model_weights.go",
+      "gateway/teecore/route2demo/model_weights_test.go",
+      "gateway/teecore/route2demo/weights.go"
+    ],
+    "route2plan": [
+      "gateway/teecore/route2plan/coord.go",
+      "gateway/teecore/route2plan/coord_test.go",
+      "gateway/teecore/route2plan/modelcfg.go",
+      "gateway/teecore/route2plan/modelcfg_test.go",
+      "gateway/teecore/route2plan/plan.go",
+      "gateway/teecore/route2plan/plan_test.go",
+      "gateway/teecore/route2plan/qknorm_test.go",
+      "gateway/teecore/route2plan/swiglu_test.go"
+    ],
+    "route2ref": [
+      "gateway/teecore/route2ref/plain_forward.go",
+      "gateway/teecore/route2ref/plain_forward_test.go"
+    ],
+    "trustedops": [
+      "gateway/teecore/trustedops/attention.go",
+      "gateway/teecore/trustedops/attention_test.go",
+      "gateway/teecore/trustedops/gqa_test.go",
+      "gateway/teecore/trustedops/nonlinear.go",
+      "gateway/teecore/trustedops/nonlinear_test.go",
+      "gateway/teecore/trustedops/rmsnorm_test.go",
+      "gateway/teecore/trustedops/rope_half_test.go"
+    ]
+  },
+  "group_own_file_counts": {
+    "adapters/qwen": 13,
+    "cipher/mask": 3,
+    "cmd/route2-client": 2,
+    "gateway/tee-infer-service/route2step": 9,
+    "gateway/teecore/maskedinfer": 10,
+    "route2demo": 4,
+    "route2plan": 8,
+    "route2ref": 2,
+    "trustedops": 7
+  },
+  "new_repo_cross_hits": [],
+  "forbidden_path_hits": [],
+  "forbidden_path_files_present": [
+    "gateway/attest-verify/cmd/attest-verify/main.go",
+    "gateway/attest-verify/dcap.go",
+    "gateway/attest-verify/dcap_test.go",
+    "gateway/attest-verify/measurement.go",
+    "gateway/attest-verify/measurement_test.go",
+    "gateway/attest-verify/server.go",
+    "gateway/attest-verify/verifier.go",
+    "gateway/attest-verify/verifier_test.go",
+    "gateway/wasm/otpmask-plugin/attest.go",
+    "gateway/wasm/otpmask-plugin/attest_test.go",
+    "gateway/wasm/otpmask-plugin/attestverify.go",
+    "gateway/wasm/otpmask-plugin/compat_test.go",
+    "gateway/wasm/otpmask-plugin/contentlabel_provenance_test.go",
+    "gateway/wasm/otpmask-plugin/contentlabel_test.go",
+    "gateway/wasm/otpmask-plugin/credential.go",
+    "gateway/wasm/otpmask-plugin/credential_channel_test.go",
+    "gateway/wasm/otpmask-plugin/credential_test.go",
+    "gateway/wasm/otpmask-plugin/credentialmgr.go",
+    "gateway/wasm/otpmask-plugin/credentialmgr_test.go",
+    "gateway/wasm/otpmask-plugin/crypto.go",
+    "gateway/wasm/otpmask-plugin/cryptoclient.go",
+    "gateway/wasm/otpmask-plugin/cryptoclient/breaker.go",
+    "gateway/wasm/otpmask-plugin/cryptoclient/client.go",
+    "gateway/wasm/otpmask-plugin/cryptoclient/client_test.go",
+    "gateway/wasm/otpmask-plugin/cryptoseam_test.go",
+    "gateway/wasm/otpmask-plugin/e2e/doc.go",
+    "gateway/wasm/otpmask-plugin/e2e/e2e_test.go",
+    "gateway/wasm/otpmask-plugin/e2e_stub_test.go",
+    "gateway/wasm/otpmask-plugin/envelope.go",
+    "gateway/wasm/otpmask-plugin/envelope_test.go",
+    "gateway/wasm/otpmask-plugin/integration_test.go",
+    "gateway/wasm/otpmask-plugin/jwt.go",
+    "gateway/wasm/otpmask-plugin/jwt_test.go",
+    "gateway/wasm/otpmask-plugin/keystore.go",
+    "gateway/wasm/otpmask-plugin/main.go",
+    "gateway/wasm/otpmask-plugin/mask.go",
+    "gateway/wasm/otpmask-plugin/mask_test.go",
+    "gateway/wasm/otpmask-plugin/mcp_opaque_test.go",
+    "gateway/wasm/otpmask-plugin/mcp_path_test.go",
+    "gateway/wasm/otpmask-plugin/metrics.go",
+    "gateway/wasm/otpmask-plugin/metrics_test.go",
+    "gateway/wasm/otpmask-plugin/protocol.go",
+    "gateway/wasm/otpmask-plugin/protocol_test.go",
+    "gateway/wasm/otpmask-plugin/ratelimitcache/ratelimitcache.go",
+    "gateway/wasm/otpmask-plugin/ratelimitcache/ratelimitcache_test.go",
+    "gateway/wasm/otpmask-plugin/ratelimitfetch.go",
+    "gateway/wasm/otpmask-plugin/report.go",
+    "gateway/wasm/otpmask-plugin/report_test.go",
+    "gateway/wasm/otpmask-plugin/revocation.go",
+    "gateway/wasm/otpmask-plugin/revocation_test.go",
+    "gateway/wasm/otpmask-plugin/route.go",
+    "gateway/wasm/otpmask-plugin/route_decide_test.go",
+    "gateway/wasm/otpmask-plugin/route_engine_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/fuzz_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/routecache.go",
+    "gateway/wasm/otpmask-plugin/routecache/routecache_canon_fixture_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/routecache_latency_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/routecache_stale_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/routecache_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/security_test.go",
+    "gateway/wasm/otpmask-plugin/routecache/size_limit_test.go",
+    "gateway/wasm/otpmask-plugin/routedispatch.go",
+    "gateway/wasm/otpmask-plugin/routedispatch_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/bench_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/canary.go",
+    "gateway/wasm/otpmask-plugin/routeengine/canary_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/chaos_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/circuitbreaker.go",
+    "gateway/wasm/otpmask-plugin/routeengine/circuitbreaker_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/coupled.go",
+    "gateway/wasm/otpmask-plugin/routeengine/coupled_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/degradation.go",
+    "gateway/wasm/otpmask-plugin/routeengine/degradation_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/engine.go",
+    "gateway/wasm/otpmask-plugin/routeengine/engine_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/engine_ttft_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/ewma.go",
+    "gateway/wasm/otpmask-plugin/routeengine/ewma_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/healthcheck.go",
+    "gateway/wasm/otpmask-plugin/routeengine/healthcheck_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/integration_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/latency.go",
+    "gateway/wasm/otpmask-plugin/routeengine/latency_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/metrics.go",
+    "gateway/wasm/otpmask-plugin/routeengine/metrics_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/race_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/retry.go",
+    "gateway/wasm/otpmask-plugin/routeengine/retry_test.go",
+    "gateway/wasm/otpmask-plugin/routeengine/retrybudget.go",
+    "gateway/wasm/otpmask-plugin/routeengine/retrybudget_test.go",
+    "gateway/wasm/otpmask-plugin/routefetch.go",
+    "gateway/wasm/otpmask-plugin/streamdone_test.go",
+    "gateway/wasm/otpmask-plugin/streamparser/bench_test.go",
+    "gateway/wasm/otpmask-plugin/streamparser/sse.go",
+    "gateway/wasm/otpmask-plugin/streamparser/sse_test.go",
+    "gateway/wasm/otpmask-plugin/streamretry_test.go",
+    "gateway/wasm/otpmask-plugin/ttft_report.go",
+    "gateway/wasm/otpmask-plugin/ttft_report_test.go",
+    "gateway/wasm/otpmask-plugin/ttftfetch.go",
+    "gateway/wasm/otpmask-plugin/ttftfetch_test.go"
+  ],
+  "self_checks": [
+    {
+      "name": "S1",
+      "pass": true,
+      "detail": "语法解析零失败（parse_failures=0, go_files=1072）"
+    },
+    {
+      "name": "S2",
+      "pass": true,
+      "detail": "闭集分组数=9（8 个被迁出包 + cipher/mask），全部键在预定义闭集内"
+    },
+    {
+      "name": "S3",
+      "pass": true,
+      "detail": "与新库零交叉（new_repo_cross_hits=0）"
+    },
+    {
+      "name": "S4",
+      "pass": true,
+      "detail": "禁碰路径零命中：import 改写候选落禁碰路径=0（只读盘点到的禁碰文件数=100，不计失败）"
+    },
+    {
+      "name": "S5",
+      "pass": true,
+      "detail": "汇总计数 go_files=1072 test_files=536 import_lines=5875 group_hits=93"
+    }
+  ]
+}

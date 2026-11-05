@@ -1,0 +1,32 @@
+# go.work 是主仓侧本地未跟踪的联调产物：由执行人本地创建、不提交、不进 CI。
+# 本库侧同样忽略（主仓 .gitignore 不作任何改动）。
+go.work
+go.work.sum
+
+# 编译产物 / 构建输出
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+
+# 临时依赖清单（G1 门禁输出与逻辑自检样本）
+deps.txt
+g1_deps.txt
+*.tmp
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db

@@ -1,0 +1,23 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "library",
+      "bom-ref": "pkg:golang/github.com/FengYang/masked-infer@v0.0.0-stage0",
+      "name": "masked-infer",
+      "version": "v0.0.0-stage0",
+      "purl": "pkg:golang/github.com/FengYang/masked-infer@v0.0.0-stage0",
+      "description": "Stage-0 skeleton of the masked-infer engine repository.",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ]
+    }
+  },
+  "components": []
+}

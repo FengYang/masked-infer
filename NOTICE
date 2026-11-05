@@ -1,0 +1,29 @@
+NOTICE — masked-infer
+
+本库（github.com/FengYang/masked-infer）以 Apache License, Version 2.0 发布，
+许可证全文见仓库根目录 LICENSE 文件。
+
+一、许可证文本来源
+  LICENSE 逐字节复制自主仓 security-ai-gateway 根目录的 LICENSE（Apache-2.0 全文）。
+  该文件末尾附有 "security-ai-gateway Subcomponents" 附录，为主仓历史第三方
+  组件清单的照录，属许可证载体附带说明；它描述的是主仓的依赖，不构成对本库
+  依赖关系的声明。本库实际依赖以 go.mod、SBOM/cdx.json 与本节枚举为准。
+
+二、第三方依赖枚举（§5 阶段 0）
+  无第三方依赖。
+  - go.mod 仅含 module 与 go 指令，零 require 块、零 replace；
+  - 全部 Go 源码仅使用 Go 标准库；
+  - SBOM/cdx.json 的 components 为空数组。
+  后续阶段若引入任何第三方依赖，须同步更新本 NOTICE、SBOM 与许可证附录。
+
+三、国密相关
+  本库不含 SM2/SM3/SM4 算法实现；国密相关能力由主仓 cryptop 调用外部 MIT 库
+  gmsm 提供，不属本库。发布前红线：全仓 `grep -rE 'func sm[234]'` 必须零命中
+  （见 scripts/verify_all.sh 本地静态段）。
+
+四、受控双份与变更管控
+  cipher/mask 为受控双份：主仓包原样保留，本库阶段 1 自带 masklite（纯标准库）。
+  本阶段（阶段 0）尚无 masklite 源码，仅有 G2 golden 向量。
+  主仓 cipher/mask 的 Stream / hmacPRG / Next 一旦变更，须重跑
+  scripts/gen_stream_golden.go 并同步 masklite/testdata/stream.golden，
+  golden 变更由两侧同批评审。
