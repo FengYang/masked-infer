@@ -190,7 +190,7 @@ FAKEGO
   if [ "$rc" -ne 0 ] || ! grep -q '^G1 PASS (empty module / 0 deps)' "$TMP_DIR/g1_d.txt"; then
     die "G1 场景 D（空模块）未输出空集判绿文案；rc=$rc out=$(cat "$TMP_DIR/g1_d.txt")"
   fi
-  pass "G1 场景 D：0 deps → 空集判绿文案，实质闭包留待阶段 1 复验"
+  pass "G1 场景 D：0 deps → 空集判绿文案（静态注入样本；实质闭包须真机 go list -test -deps 复验，🖥 未取证）"
 
   # (e) check_import_closure.go 基线复核（纯标准库，go1.20 可跑）
   #   默认弱校验：只断言三项真门禁为空（parse_failures / forbidden_path_hits /
@@ -236,9 +236,15 @@ FAKEGO
       -forbid-prefix 'github.com/emmansun/gmsm' \
       -out "$TMP_DIR/verify-self.json" > "$TMP_DIR/verify-self.log" 2>&1; then
     pass "新库零主仓依赖（verify 模式 S1/S4/S6 全 PASS、S2/S3 主仓语义 SKIP；白名单仅 verify_golden_against_main.go）"
-    # 白名单可审计性：被跳过的文件数必须恒为 1（>1 说明白名单被人为扩大，须人工复核）
-    grep -E '^VERIFY_WHITELIST_SKIPPED_FILES=1' "$TMP_DIR/verify-self.log" > /dev/null \
-      || die "verify 白名单跳过数不为 1：$(grep 'VERIFY_WHITELIST_SKIPPED_FILES' "$TMP_DIR/verify-self.log" || echo '(无该行)')"
+    # 白名单可审计性：被跳过的文件数必须恒为 1（>1 说明白名单被人为扩大，须人工复核）。
+    # 判据必须是**数值等于 1**，不能写成 `grep -E '^...=1'` 命中即过：
+    # 那个正则没有尾锚，`=12`、`=19` 都以 `=1` 开头，白名单从 1 个扩到 12 个照样放行
+    # （这正是「守卫自身有假绿」的形态）。取值后再比较，且取不到（空串）同样判红 ——
+    # 否则工具一旦停止打印该行，守卫就静默失效。
+    wl_n="$(sed -n 's/^VERIFY_WHITELIST_SKIPPED_FILES=\([0-9][0-9]*\).*/\1/p' "$TMP_DIR/verify-self.log" | head -n 1)"
+    if [ "$wl_n" != "1" ]; then
+      die "verify 白名单跳过数不为 1（实际 ${wl_n:-未取到}）：白名单可能被人为扩大、或工具未打印该行"
+    fi
     # _test.go 覆盖性：G1 的关键风险是随迁测试把主仓路径带进闭包，故必须确认测试文件纳入扫描
     test_files_seen="$(sed -n 's/.*已覆盖 test_files=\([0-9][0-9]*\).*/\1/p' "$TMP_DIR/verify-self.log" | head -n 1)"
     if [ -z "$test_files_seen" ] || [ "$test_files_seen" -le 0 ]; then
@@ -570,6 +576,22 @@ run_remote() {
   #     REMOTE_SKIPS 自增不会回传父 shell（这是 shell 语义，不是 bug），所以
   #     「日志复扫」才是这几段计数的**权威来源**；strict 负责当场判红、给出精确 label。
   #   - 本闸同时兜住「将来新增门控但忘了用 strict」这类回归。
+  #
+  # 门控日志存在性断言（必须在下面的通配循环**之前**）：
+  #   循环写的是 `for x in "$TMP_DIR"/gate*.log`，无匹配时 bash 会把未展开的字面量
+  #   `…/gate*.log` 当成一项传进来，再被 `[ -f ] || continue` 兜掉 —— 结果是
+  #   「一份门控日志都没有」也被当成正常：某个门控没跑/中途退出 ⇒ total_skips=0 ⇒
+  #   照打段末判绿标记。所以这里先按**具体文件名**逐个断言存在，缺一即 die。
+  #   注意 gate3_sub.log 只在 gate3 新库侧真的跑过时才有（GATE3_SUB_RAN=1）。
+  gate_must_logs="gate1.log gate2.log gate3_main.log"
+  if [ "${GATE3_SUB_RAN:-0}" -eq 1 ]; then
+    gate_must_logs="$gate_must_logs gate3_sub.log"
+  fi
+  for m in $gate_must_logs; do
+    [ -f "$TMP_DIR/$m" ] \
+      || die "真机段缺少门控日志 ${m}：该门控未执行或中途退出，禁止输出段末判绿标记"
+  done
+
   local_gate_skips=0
   for gate_log in "$TMP_DIR"/gate*.log; do
     [ -f "$gate_log" ] || continue

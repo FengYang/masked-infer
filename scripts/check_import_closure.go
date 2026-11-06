@@ -115,6 +115,14 @@ type SelfCheck struct {
 	Detail string `json:"detail"`
 }
 
+// Report 是扫描报告（JSON 结构与已提交基线 scripts/closure-baseline.json 逐字节绑定：
+// 字段名、顺序、omitempty 一律不可改，否则 baseline 的 cmp 会失败）。
+//
+// 读 total_group_hits 时的注意事项（本字段不参与 verify 判定，仅 baseline 计数强比对用）：
+//   - verify 模式下该字段**含新库自引用噪声，不是主仓依赖**。扫新库时 `…/core/trustedops`
+//     会命中短键 `trustedops` 而被计入（实测 group_hits=2），那是 core 引用自己的子包，正常。
+//   - 判断「新库是否依赖主仓」请只看 forbidden_prefix_hits（S6 判据）与 new_repo_cross_hits，
+//     不要看 total_group_hits。
 type Report struct {
 	Schema             string              `json:"schema"`
 	Mode               string              `json:"mode"`
@@ -376,6 +384,15 @@ func evaluate(report *Report) {
 		// 同时把「_test.go 是否被纳入扫描」并入本门禁：G1 的关键风险之一就是随迁测试把主仓
 		// 路径带进闭包（历史上 core/multilayer_masked_test.go 就 import 过 cipher/mask）。
 		// 若将来有人让扫描器跳过 _test.go，test_files 会归零 → S6 直接 FAIL（fail-closed）。
+		//
+		// 失败明细：命中时逐条打到 stderr，省掉「另开 -out 读 JSON 才能知道命中在哪」。
+		// 只加输出：不改退出码、不改 JSON 序列化、零命中时不打印（成功路径输出不变）。
+		if report.ForbiddenPrefixHits != nil && len(*report.ForbiddenPrefixHits) > 0 {
+			fmt.Fprintf(os.Stderr, "S6 失败明细（%d 条禁用前缀命中）：\n", len(*report.ForbiddenPrefixHits))
+			for _, h := range *report.ForbiddenPrefixHits {
+				fmt.Fprintln(os.Stderr, "  [hit] "+h)
+			}
+		}
 		switch {
 		case report.ForbiddenPrefixHits == nil:
 			add("S6", false, "S6 失败：verify 模式未传 -forbid-prefix，无法判定零命中")
