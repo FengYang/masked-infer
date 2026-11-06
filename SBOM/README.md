@@ -1,4 +1,4 @@
-# SBOM（阶段 0 最小基线）
+# SBOM（阶段 2 基线）
 
 ## 本阶段产物
 
@@ -26,8 +26,11 @@ syft packages dir:. -o cyclonedx-json@1.5 > SBOM/cdx.json
 2. NOTICE 第三方依赖枚举与 SBOM components 一致；
 3. 国密外发红线：全仓 `grep -rE 'func sm[234]'` 零命中；
 4. G1 门禁（`scripts/gate_g1.sh`）零命中；
-5. 本文件为阶段 0 基线快照；阶段 1–4 引入任何第三方依赖时必须同步更新 NOTICE/SBOM，
+5. 本文件为阶段 2 基线快照；阶段 1–4 引入任何第三方依赖时必须同步更新 NOTICE/SBOM，
    并在发布前由工具重生成，禁止沿用本基线冒充发布产物。
 
 > 阶段 1 补充：迁入的 5 个包与 `masklite` 全部只用 Go 标准库，`go.mod` 仍零 `require`，
 > 故 `cdx.json` 的 `components` 保持 `[]`，本阶段**未改动** `cdx.json`。
+
+> 阶段 2 补充：仅将 `cdx.json` 的 stage 标签由 `v0.0.0-stage0` 提升为 `v0.0.0-stage2`
+> （description 同步更新），`components` 仍为 `[]`——本阶段无第三方依赖引入。

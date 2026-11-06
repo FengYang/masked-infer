@@ -10,7 +10,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 
 ## 状态
 
-- **阶段 0 骨架与阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）已完成；阶段 2–4 待执行。**
+- **阶段 0 骨架、阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）与阶段 2（ref/ 迁入 + 全库内部编号清理）已完成；阶段 3–4 待执行。**
 - 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取网关仓库 origin 所属账号
   `FengYang`，CI 变量 `SUB_ORG` 可覆写。
 - `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
@@ -22,7 +22,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 |---|---|---|
 | `core/` | 纯计算内核（QuantizedMatrix / CipherLinear / MaskImage / Unmask / Decode / int128·Mod64），含 CUDA / 昇腾 dlopen 后端 | 已落地（阶段 1）：10 个 `.go` + `.h` / `.cu` / `.cpp` 各 1 |
 | `plan/` | TensorKey + 权重构建 | 已落地（阶段 1）：8 个 `.go` |
-| `ref/` | 去量化参照前向（数值对拍基准） | 待迁移（阶段 2） |
+| `ref/` | 去量化参照前向（数值对拍基准） | 已迁移（阶段 2）：plain_forward.go / plain_forward_test.go |
 | `demo/` | 合成小模型演示 | 已落地（阶段 1）：4 个 `.go` |
 | `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops | 规划中，尚未建包 |
 | `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地（阶段 1）：12 个 `.go` |
@@ -94,8 +94,9 @@ code only; the service form is decided by the integrating party.
 
 ### Status
 
-- **Stage 0 skeleton and Stage 1 (CA-1 / CA-2 decoupling plus the 5-package
-  migration) are complete; Stages 2–4 are pending.**
+- **Stage 0 skeleton, Stage 1 (CA-1 / CA-2 decoupling plus the 5-package
+  migration) and Stage 2 (ref/ migration + repository-wide internal numbering
+  cleanup) are complete; Stages 3–4 are pending.**
 - Module path `github.com/FengYang/masked-infer`; `<org>` defaults to `FengYang`
   (owner of the main repository origin) and can be overridden by CI variable `SUB_ORG`.
 - `go 1.26.0`; `go.mod` has zero `require`, zero `replace`, zero third-party dependencies.
@@ -107,7 +108,7 @@ Landed in Stage 1: `core/` (10 `.go` files plus one each of `.h` / `.cu` / `.cpp
 `core/trustedops/` (7 `.go`), `plan/` (8 `.go`), `demo/` (4 `.go`),
 `adapters/qwen/` (12 `.go`) and `masklite/` (`masklite.go`, `memzero.go`,
 `masklite_test.go` plus `testdata/stream.golden`).
-Still pending: `ref/` (Stage 2), `step/` (Stage 3) and `backend/` (Stage 4).
+Still pending: `step/` (Stage 3) and `backend/` (Stage 4). `ref/` was migrated in Stage 2.
 `adapterkit/` is planned but not created yet.
 
 ### Boundaries and invariants
