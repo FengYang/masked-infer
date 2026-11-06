@@ -37,6 +37,15 @@ fi
 # 只改输出文案，不改判定逻辑：空模块（0 deps）时明确标注「空集判绿」，
 # 避免把无包可扫误读为实质闭包已验证；文案仍以 "G1 PASS" 开头，保证既有
 # 断言（verify_all.sh 场景 A/B/C 与 QA 样本组）不受影响。
+# 国密红线（§6 #4）：本库只**调用** github.com/emmansun/gmsm，绝不自行实现
+# SM2/SM3/SM4 原语。这是"整体开源不构成国密实现外发"的机器证据，必须在 CI 强制。
+# 仅扫描 .go 源（与主仓库 archtest.TestNoGuomiImplementation 一致），避免命中脚本自身注释。
+if grep -rEn --include='*.go' 'func (SM|sm)[234](\(| )' .; then
+  echo "G1 FAIL: 疑似自实现国密原语（SM2/SM3/SM4）"
+  exit 1
+fi
+echo "G1 PASS: 零自实现国密原语（func (SM|sm)[234] 零命中）"
+
 DEP_COUNT="$(wc -l < "${DEPS_FILE}" | tr -d '[:space:]')"
 if [ "${DEP_COUNT}" -eq 0 ]; then
   echo "G1 PASS (empty module / 0 deps): 空集判绿，实质闭包判绿须待阶段 1 有包后复验"
