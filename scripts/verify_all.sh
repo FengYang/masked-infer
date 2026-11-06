@@ -83,7 +83,7 @@ field() {
 # assert_run <log> <label> [必须实跑的测试函数名...]
 # 防 `go test -run` 无匹配却 exit 0 的恒假 PASS；「有 === RUN」才证明测试真跑过。
 #
-# 三条判据都只看**日志内容**，不看管道 rc —— 因为 `go test ... | tee` 的 rc 语义依赖
+# 四条判据都只看**日志内容**，不看管道 rc —— 因为 `go test ... | tee` 的 rc 语义依赖
 # pipefail：本脚本 `set -euo pipefail` 时 rc 能穿透（实测失败用例 rc=1），但只要有人
 # 在某个子 shell 里 `set +o pipefail`、或把这段片段抄到别处，rc 就变成 tee 的 0（实测
 # 同一失败用例 rc=0）。所以「有没有失败」必须自己从输出里读，不能指望 rc。
@@ -107,6 +107,15 @@ assert_run() {
   # （命中即关读端 → 上游 SIGPIPE(141) → pipefail 下把正常通过误判红）。
   if grep -qE '^[[:space:]]*--- FAIL' "$log"; then
     die "${label} 输出含 --- FAIL（go test 失败但管道 rc 可能被 tee 吞成 0）：禁止判过"
+  fi
+  # R2-e：FAIL 汇总行判据。测试函数体内的 os.Exit(1) / log.Fatal / runtime.Goexit
+  # 会直接终止**测试进程**，任何 --- FAIL 都来不及打印（实测：输出只剩
+  # `=== RUN   TestE` + `FAIL <pkg> 0.6s` + 裸 `FAIL`，`--- FAIL` 命中 0 次），
+  # 上面那条 --- FAIL 硬判与管道 rc 双双失效 → 必须再拦 FAIL 汇总行。
+  # 锚定 `[[:space:]]|$`：裸 `FAIL` 行与 `FAIL <pkg> <dur>` 都命中；`--- FAIL`
+  # （行首是 ---）不受影响；正常通过的输出（`ok <pkg>` / `PASS`）零命中，不误伤。
+  if grep -qE '^FAIL([[:space:]]|$)' "$log"; then
+    die "${label} 输出含 FAIL 汇总行（测试进程非正常退出，--- FAIL 不会打印）：禁止判过"
   fi
   # SKIP 只告警不改判（宽松版语义）；同样缩进容忍，子测试 Skip 输出为 `    --- SKIP: TestX/sub`。
   if grep -qE '^[[:space:]]*--- SKIP' "$log"; then
@@ -512,7 +521,51 @@ DUMMYFAILGO
   rc=0
   ( assert_run "$TMP_DIR/guard_fail.log" "GUARD-FAIL" TestGuardFail ) >/dev/null 2>&1 || rc=$?
   [ "$rc" -ne 0 ] || die "assert_run 未拦住 --- FAIL（管道 rc 被吞时会假绿）"
-  pass "缩进逃逸与 FAIL 硬判自检（C 子测试缩进 SKIP 已判红：行首命中 ${sub_line_start_hits} 次 / 缩进命中 ${sub_indented_hits} 次；D --- FAIL 已判红：关 pipefail 后管道 rc=${fail_pipe_rc_nopipefail} 已被吞仍判红）"
+  pass "缩进逃逸与 FAIL 硬判自检（C 子测试缩进 SKIP 已判红：行首命中 ${sub_line_start_hits} 次 / 缩进命中 ${sub_indented_hits} 次；D --- FAIL 已判红：关 pipefail 后管道 rc=${fail_pipe_rc_nopipefail} 已被吞仍判红；panic 不属此洞 —— panic 本身就会打行首 --- FAIL，已被上面 D 的判据覆盖）"
+
+  #   样本 E（os.Exit，R2-e）：测试函数体内 os.Exit(1) 直接终止测试进程，
+  #     `--- FAIL` 来不及打印（实测真实 go test：--- FAIL 命中 0 次、=== RUN 有、
+  #     管道 rc=0），只剩 FAIL 汇总行可抓 → assert_run 必须靠
+  #     `^FAIL([[:space:]]|$)` 判红。这是 D-1/W-2 同族的第三缺口（前两个已堵）。
+  cat > "$guard_pkg/dummy_exit_test.go" <<'DUMMYEXITGO'
+package dummy
+
+import (
+	"os"
+	"testing"
+)
+
+// TestGuardExit 模拟「测试函数体内 os.Exit(1)」的形态：进程当场死掉，
+// --- FAIL 不会打印，只剩 FAIL 汇总行。
+func TestGuardExit(t *testing.T) {
+	t.Log("guard os.Exit sample: 模拟测试函数体内 os.Exit(1)")
+	os.Exit(1)
+}
+DUMMYEXITGO
+  # tee 仍落盘、stdout 进 /dev/null（同样本 A–D 形态）；管道 rc 无论如何不参与判定。
+  ( set +o pipefail
+    cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardExit$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_exit.log" >/dev/null ) || true
+  # 前置断言（与样本 C/D 同理）：先分「没跑起来（环境）」和「跑了但形态不对（格式变了）」。
+  exit_run_count="$(grep -c '^=== RUN' "$TMP_DIR/guard_exit.log" || true)"
+  exit_run_count="${exit_run_count:-0}"
+  [ "$exit_run_count" -ge 1 ] \
+    || die "os.Exit 样本未产出任何 === RUN（go test 很可能被杀软拦截了临时编译产物，属环境问题，非判据失效）：$(tail -n 3 "$TMP_DIR/guard_exit.log")"
+  # 样本有效性自证：--- FAIL 必须命中 0 次（洞存在的前提）、FAIL 汇总行必须命中 >=1
+  # （新判据的靶子确实在）。两件事都被机器证明，而不是口头断言。
+  exit_indent_fail_hits="$(grep -cE '^[[:space:]]*--- FAIL' "$TMP_DIR/guard_exit.log" || true)"
+  exit_summary_hits="$(grep -cE '^FAIL([[:space:]]|$)' "$TMP_DIR/guard_exit.log" || true)"
+  exit_indent_fail_hits="${exit_indent_fail_hits:-0}"
+  exit_summary_hits="${exit_summary_hits:-0}"
+  [ "$exit_indent_fail_hits" -eq 0 ] \
+    || die "os.Exit 样本意外出现 --- FAIL 行（命中 ${exit_indent_fail_hits} 次）：样本形态与本洞前提不符，须复核样本与 Go 输出格式"
+  [ "$exit_summary_hits" -ge 1 ] \
+    || die "os.Exit 样本有 === RUN 但无 FAIL 汇总行：Go 的 -v 输出格式可能变了，须复核正则，非环境问题：$(tail -n 3 "$TMP_DIR/guard_exit.log")"
+  rc=0
+  ( assert_run "$TMP_DIR/guard_exit.log" "GUARD-EXIT" TestGuardExit ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] \
+    || die "assert_run 未拦住 os.Exit 样本（仅靠 --- FAIL 硬判时，测试进程非正常退出会双双假绿）"
+  pass "os.Exit 逃逸自检（E os.Exit 样本已判红：--- FAIL 命中 ${exit_indent_fail_hits} 次 / FAIL 汇总行命中 ${exit_summary_hits} 次，管道 rc 被吞仍判红；log.Fatal 与 runtime.Goexit 同属本洞，判据一致覆盖）"
 
   # (l) 仓库可 clone 留证（只读，临时目录，不污染仓库）
   if [ -d .git ]; then
@@ -626,6 +679,8 @@ run_remote() {
       -golden "$SUB_REPO/masklite/testdata/stream.golden"
   )
   # 段末总闸（F-B 第二层，防「漏改 strict 仍在段末宣称全取证」）：
+  #   **仅在 run_remote 上下文内使用（无条件要求 gate1/gate2/gate3_main 三份日志存在）**；
+  #   静态段不得调用 —— 静态段没有真机门控日志，误用会把空集当全绿。
   #   独立复扫本次全部门控日志，任何 --- SKIP 都禁止输出 [REMOTE-PASS]。
   #   与 assert_run_strict 的即时 die 是**双保险**，不是重复：
   #   - 门控 1/2/3(主仓侧) 跑在 `( cd "$MAIN_REPO" ... )` 子 shell 里，子 shell 内的
