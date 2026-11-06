@@ -40,7 +40,7 @@ const (
 	TensorKNorm   = "attn.k_norm" // 每 block 的 K 逐头归一 gamma（Qwen3；长度 = HeadDim，所有头共享）
 	TensorLMHead  = "lm_head"     // Dim -> Vocab；非方阵（Rows != Cols）由 QuantizedMatrix 的 Rows/Cols 分离天然支持，无需改动数值内核
 	// TensorTokEmb token 嵌入表：Vocab -> Dim 的查表（Gather），全局一份。
-	// 补录原因（T02 发现的设计漏项）：张量枚举原本只有 attn.*/ffn.*/ln_*/lm_head，
+	// 补录原因（发现的设计漏项）：张量枚举原本只有 attn.*/ffn.*/ln_*/lm_head，
 	// 而**没有嵌入就跑不了前向**。客户端注入与服务端 Gather 必须共用同一张表，
 	// 各派生一份是不可接受的（漂移症状是"输出随机错 token"且极难查）。
 	// 它与其他收尾张量一样取哨兵块号 cfg.Blocks（见 route2demo.checkBlockBounds）。
@@ -151,7 +151,7 @@ const (
 	OpResidualAdd = "residual_add"
 	OpSwiGLUMul   = "swiglu_mul" // 逐元素 silu(gate) ⊙ up（SwiGLU 门控，arity=2）
 	// OpKVReset 会话级 KV 复位。它是**带外 op**（走同一 HTTP 端点但不占 plan 下标，
-	// 见 D10），故不得出现在任何 StepSpec.Op 中，Plan.Validate() 会据此拒绝。
+	//），故不得出现在任何 StepSpec.Op 中，Plan.Validate() 会据此拒绝。
 	OpKVReset = "kv_reset"
 )
 
@@ -207,7 +207,7 @@ type StepSpec struct {
 	Writes bool
 	// Reads 是否读 KV cache（仅 attention 为真）。
 	Reads bool
-	// Terminal 终止步（argmax）：输出为 token，明文下行，不再重掩码（D12 注明下行未加密）。
+	// Terminal 终止步（argmax）：输出为 token，明文下行，不再重掩码（注明下行未加密）。
 	Terminal bool
 }
 
@@ -381,13 +381,13 @@ func BuildTurn(cfg ModelConfig, stage Stage, turn uint32) (Plan, error) {
 			[]WeightRef{RefKey(TensorKey{Block: b, Tensor: TensorAttnK})},
 			0, true, false, false)
 
-		// (2) kv_append_v：V̂ = Wv·V_hn（V 不做 RoPE，见 D8）。输入宽同 KVDim。
+		// (2) kv_append_v：V̂ = Wv·V_hn（V 不做 RoPE，）。输入宽同 KVDim。
 		emit(coordOf(blk, StepKVAppend, BranchV), OpKVAppendV,
 			[]int{cfg.KVDim()}, []int{base + offAttnNorm},
 			[]WeightRef{RefKey(TensorKey{Block: b, Tensor: TensorAttnV})},
 			0, true, false, false)
 
-		// (3) attention：Q̂ = Wq·V_hn -> 全注意核（可信域明文，D1）-> V_ao（宽 attnDim）。
+		// (3) attention：Q̂ = Wq·V_hn -> 全注意核（可信域明文，）-> V_ao（宽 attnDim）。
 		// 注意输出宽 == attnDim（Heads*HeadDim），而非 Dim：注意力原始拼接输出是多头宽，
 		// 由下一步 Wo([Dim, attnDim]) 映回 Dim 后才汇入残差流（Qwen3 attnDim≠Dim 亦成立）。
 		emit(coordOf(blk, StepKVAppend, BranchQ), OpAttention,
@@ -490,7 +490,7 @@ func (p Plan) At(seq int) (StepSpec, error) {
 	return p[seq], nil
 }
 
-// CoordAt 取第 seq 步的坐标（T03 校验 req.Coord == plan[pos].Coord 用）。
+// CoordAt 取第 seq 步的坐标（校验 req.Coord == plan[pos].Coord 用）。
 func (p Plan) CoordAt(seq int) (LayerCoord, error) {
 	s, err := p.At(seq)
 	if err != nil {

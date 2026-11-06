@@ -1,8 +1,8 @@
-// Package route2plan 路线 2 · M2 的「层坐标系 + plan 真值源」。
+// Package route2plan 路线 2 的「层坐标系 + plan 真值源」。
 //
-// 本包是整个 M2 的**公共契约**：客户端编排器（cmd/route2-client）与可信域服务端
+// 本包是整个路线 2 的**公共契约**：客户端编排器（cmd/route2-client）与可信域服务端
 // （gateway/tee-infer-service）一律依赖本包派生各自的行为，二者不再各自维护一份
-// 层序假设（消灭 G9）。T02/T03/T04 均建立在以下三条硬规则之上：
+// 层序假设（消灭 G9）。本包设计建立在以下三条硬规则之上：
 //
 // 规则 1（字段次序 ≡ 因果次序）：坐标六元组
 //
@@ -57,7 +57,7 @@ const (
 
 // InjectDomainPrefix 客户端第 0 步注入掩码的域前缀（记号 ρ_inj）。
 //
-// 【实现裁定 · 需团队确认】注入域写成不带参数的 otpmask/inject/v2，
+// 【实现裁定】注入域写成不带参数的 otpmask/inject/v2，
 // 但 d0 又写作 ρ_inj(turn=k)——二者不自洽：若 prefill 与全部 decode 轮共用
 // 一个注入域，则同一 ρ_inj 会被用来掩盖多个不同明文（不同轮的 token 嵌入），
 // 直接违反「一步一掩码、绝不重用」。
@@ -130,13 +130,13 @@ const (
 	StepAttnResidual // 02
 	// StepFFNNorm FFN 前的 RMSNorm（ln_post）。
 	StepFFNNorm // 03
-	// StepFFNUp FFN 升维后的 GELU（D4：无门控 MLP FFN，SwiGLU 留后）。
+	// StepFFNUp FFN 升维后的 GELU（无门控 MLP FFN，SwiGLU 留后）。
 	StepFFNUp // 04
 	// StepFFNResidual FFN 残差相加（扇入 2 行），输出即下一 block 的输入 h。
 	StepFFNResidual // 05
 
 	// ---- 以下两项为未列出的收尾步，由本 plan 的数据流倒逼补全 ----
-	// 【实现裁定 · 需团队确认】
+	// 【实现裁定】
 	// StepFinalNorm 收尾 RMSNorm（ln_final），Block 取哨兵值 cfg.Blocks。
 	StepFinalNorm // 06
 	// StepArgMax 收尾 argmax（lm_head 已由加速器完成投影），Block 取哨兵值 cfg.Blocks。
@@ -180,7 +180,7 @@ const (
 	BranchMain Branch = 0
 	// BranchK K 分支（= BranchMain，扇出步的第一条，最先执行）。
 	BranchK Branch = 0
-	// BranchV V 分支（V 不做 RoPE，见 D8）。
+	// BranchV V 分支（V 不做 RoPE，）。
 	BranchV Branch = 1
 	// BranchQ Q 分支（attention），因果次序排在 K/V 追加之后。
 	BranchQ Branch = 2
@@ -218,7 +218,7 @@ type LayerCoord struct {
 	Step Step
 	// Branch 同子步并行分支，取值域 0..9。
 	Branch Branch
-	// Chunk 大 batch 分片序号（M2 预留，恒 0，见 D7）；取值域 0..99。
+	// Chunk 大 batch 分片序号（预留，恒 0，）；取值域 0..99。
 	Chunk uint16
 }
 

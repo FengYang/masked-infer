@@ -1,5 +1,5 @@
 // 密文线性内核与明文对照。
-// 单层：随机输入，密文内核 vs 明文内核 → 量化误差在容忍范围内（M0 修正后）。
+// 单层：随机输入，密文内核 vs 明文内核 → 量化误差在容忍范围内（修正后）。
 package maskedinfer
 
 import (
@@ -229,7 +229,7 @@ func TestB2EndToEndAccuracy(t *testing.T) {
 	}
 }
 
-// TestM0RegressionGate M0 核心：随机化崩坏回归门禁。
+// TestM0RegressionGate 核心：随机化崩坏回归门禁。
 // 覆盖 Mod64（生产首选）× bit{8,16} × dim{512..4096} × 多 seed，
 // 任一失配（偶发/不可复现数值崩坏）即 fail。
 func TestM0RegressionGate(t *testing.T) {

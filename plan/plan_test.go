@@ -1,4 +1,4 @@
-// plan_test.go - Build 确定性 / plan 合法性 / 逐行掩码溯源 契约测试（T01 验收项 2、3、4）
+// plan_test.go - Build 确定性 / plan 合法性 / 逐行掩码溯源 契约测试（验收项 2、3、4）
 package route2plan
 
 import (

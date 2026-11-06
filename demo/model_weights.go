@@ -15,7 +15,7 @@ import (
 // 但 ModelID/Block/Tensor 进入盐值，因此与 LayerWeights **互不冲突**（后者盐值为
 // "layer-<L>-<i>-<j>"），两条派生路径互不干扰。
 //
-// LayerWeights(layer, dim) 按 D15 裁定**保留不删**：既有 MLP demo 与既有测试仍在使用。
+// LayerWeights(layer, dim) 按 裁定**保留不删**：既有 MLP demo 与既有测试仍在使用。
 //
 // 派生公式（与既有实现逐字同源）：
 //
@@ -27,9 +27,9 @@ import (
 //	[-0.75, 0.25)，**均值约 -0.25**（不是对称的 [-0.25, 0.25)）
 //
 // 这是从既有 LayerWeights 继承过来的公式形态，属于既有 demo 权重的事实语义，
-// 不在 T01/T02 范围内改动（改了会让既有 demo 基线与历史数值对不上）。
+// 不在 / 范围内改动（改了会让既有 demo 基线与历史数值对不上）。
 // 副作用仅一条：量化时 scale = maxAbs/127 由负半轴主导，正半轴量化分辨率略差，
-// 这正是 int8 量化噪声的一部分来源（详见 T02 回报的观测数据）。
+// 这正是 int8 量化噪声的一部分来源（详见 回报的观测数据）。
 // 再经 NewQuantizedMatrixMod(w, 8, Mod64) 量化（scale = maxAbs/127）。
 // 「确定性」的全部含义：给定 (cfg, key)，客户端与服务端各自算出来的 Data 逐位相等，
 // 从而两侧 MaskImage / CipherLinear 的结果才有共同的整数域基准（否则脱掩码必然出乱码）。
@@ -46,7 +46,7 @@ const gammaSpread = 0.25
 
 // ModelWeights 权重提供者契约。
 //
-// 服务端推荐的接入方式：T03 的 step_exec 只依赖本接口，具体实现可以是本文件的
+// 服务端推荐的接入方式： 的 step_exec 只依赖本接口，具体实现可以是本文件的
 // 确定性 demo 实现（Weights），也可以是日后的真实权重加载器，两者对上层透明。
 type ModelWeights interface {
 	// Matrix 返回张量的量化权重矩阵（int8 / Mod64）。
@@ -114,7 +114,7 @@ func TensorWeights(cfg route2plan.ModelConfig, k route2plan.TensorKey) (*maskedi
 
 // RawWeights 返回**未经量化**的原始浮点权重（行优先）。
 //
-// 用途：为 T02 的 ref-fp32 基线提供 hooks——ref-fp32 需要用未量化的派生权重做 fp64 前向，
+// 用途：为 ref-fp32 基线提供 hooks——ref-fp32 需要用未量化的派生权重做 fp64 前向，
 // 才能把「量化损失」与「掩码管线自身误差」正交分解（双基线）。
 func RawWeights(cfg route2plan.ModelConfig, k route2plan.TensorKey) ([][]float64, error) {
 	if err := cfg.Validate(); err != nil {
@@ -220,7 +220,7 @@ func QKNormParams(cfg route2plan.ModelConfig, k route2plan.TensorKey) (gamma []f
 }
 
 // TensorShape 返回张量的逻辑形状 (rows, cols)：rows = 输出维，cols = 输入维。
-// 所有 Caller（TensorWeights / RawWeights / T02 的 ref 前向）都必须走这一处，
+// 所有 Caller（TensorWeights / RawWeights / 的 ref 前向）都必须走这一处，
 // 杜绝「客户端按 (in,out) 造、服务端按 (out,in) 造」这类维度转置事故。
 func TensorShape(cfg route2plan.ModelConfig, k route2plan.TensorKey) (rows int, cols int, err error) {
 	if err := k.Validate(); err != nil {

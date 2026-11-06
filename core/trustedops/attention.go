@@ -1,4 +1,4 @@
-// Package trustedops 的 attention 算子文件（T02 · G7）。
+// Package trustedops 的 attention 算子文件（G7）。
 //
 // ============================ 可信边界声明（务必先读） ============================
 //
@@ -12,12 +12,12 @@
 //
 // 它**永远看不到任何明文激活**。
 //
-// 因此把 `Q·Kᵀ` 与 `scores·V` 放在可信域不是 M2 的退让——整条链路的安全性完全押在
-// 可信域上，而不是押在"注意力机制被加密"上（D1）。
+// 因此把 `Q·Kᵀ` 与 `scores·V` 放在可信域不是退让——整条链路的安全性完全押在
+// 可信域上，而不是押在"注意力机制被加密"上。
 // 由本文件导出的算子若被放到可信域之外调用，等于把 `Q·Kᵀ` 的明文结果交出去，
 // 属于信任模型破坏，不是性能取舍。
 //
-// 【数值约定冻结 · RoPE 排布（T02 裁定，团队已确认）】
+// 【数值约定冻结 · RoPE 排布（裁定）】
 //
 // 本代码库**冻结为 Su et al. (2021) 的相邻对旋转排布**：
 //
@@ -47,7 +47,7 @@ import (
 	"math"
 )
 
-// CausalMaskValue 因果掩码哨兵值：** -1e30 而非 -Inf **（D9 / 风险表 R9）。
+// CausalMaskValue 因果掩码哨兵值：** -1e30 而非 -Inf **（风险表 R9）。
 //
 // 原因写在 nonlinear.go 的 Softmax 实现里（`nonlinear.go:27-43`）：
 //
@@ -61,7 +61,7 @@ const CausalMaskValue = -1e30
 
 // RoPEPair 对第 pairIdx 对分量做旋转位置编码（RoPE）。
 //
-// 采用 Su et al. (2021) 的**相邻对旋转**形式（D8「成对旋转」）：
+// 采用 Su et al. (2021) 的**相邻对旋转**形式「成对旋转」：
 //
 //	θ_i = pos · theta^(-2i/headDim)          i = pairIdx
 //	x'  = x·cosθ_i - y·sinθ_i
@@ -172,7 +172,7 @@ func Scores(q []float64, kRows [][]float64, heads, headDim int) ([][]float64, er
 //
 // 就地修改并返回同一切片（便于链式书写）；调用方如需保留原 scores 请先拷贝。
 //
-// 【为什么这里不用 -Inf】见 CausalMaskValue 的注释（设计 D9 / 风险表 R9）：
+// 【为什么这里不用 -Inf】见 CausalMaskValue 的注释（风险表 R9）：
 // 整行全掩码时 -Inf 会让 Softmax 出 NaN。
 func CausalMask(scores [][]float64, qPos, kvStart int) [][]float64 {
 	for h := range scores {
@@ -262,7 +262,7 @@ func WeightedSum(probs [][]float64, vRows [][]float64, heads, headDim int) ([]fl
 // 【位置纪律 · 最容易静默写错的地方】RoPE 必须作用在 Q/K 上且**在 KV 追加之前**完成：
 // RoPE 是按**绝对位置**旋转的：若把未旋转的 K 写进缓存、等到读的时候才旋转，
 // 就会出现「同一行被重复旋转」或「Q/K 位置错位」——二者都不报错，
-// 只表现为困惑度莫名劣化（D8 / 序 3-4）。
+// 只表现为困惑度莫名劣化（序 3-4）。
 func Attention(q []float64, kRows, vRows [][]float64, heads, headDim, kvStart, qPos int, causal bool) ([]float64, error) {
 	if len(kRows) != len(vRows) {
 		return nil, fmt.Errorf("teecore: K/V 行数不一致 %d != %d", len(kRows), len(vRows))

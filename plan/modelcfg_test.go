@@ -1,4 +1,4 @@
-// modelcfg_test.go - 配置校验与 DemoTiny 常量源测试（T01 验收项 4）
+// modelcfg_test.go - 配置校验与 DemoTiny 常量源测试（验收项 4）
 package route2plan
 
 import (
@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// TestDemoTinyIsValid D6 裁定的 demo 配置必须能通过全部校验。
+// TestDemoTinyIsValid 裁定的 demo 配置必须能通过全部校验。
 func TestDemoTinyIsValid(t *testing.T) {
 	if err := DemoTiny.Validate(); err != nil {
 		t.Fatalf("DemoTiny 未通过校验: %v", err)
 	}
 }
 
-// TestDemoTinyValues demo 配置的每个数字都锚定 D6，防止被悄悄改掉而无人察觉。
+// TestDemoTinyValues demo 配置的每个数字都锚定 ，防止被悄悄改掉而无人察觉。
 func TestDemoTinyValues(t *testing.T) {
 	cfg := DemoTinyConfig()
 	if cfg.ModelID != DemoModelID {

@@ -14,14 +14,14 @@ NOTICE — masked-infer
   后续阶段若引入任何第三方依赖，须同步更新本 NOTICE、SBOM 与 LICENSE。
 
 三、国密相关
-  本库不含 SM2/SM3/SM4 算法实现；国密相关能力由主仓 cryptop 调用外部 MIT 库
+  本库不含 SM2/SM3/SM4 算法实现；国密相关能力由网关仓库 cryptop 调用外部 MIT 库
   gmsm 提供，不属本库。发布前红线：全仓 `grep -rE 'func sm[234]'` 必须零命中
   （见 scripts/verify_all.sh 本地静态段）。
 
 四、受控双份与变更管控
-  cipher/mask 为受控双份：主仓包原样保留，本库自带 masklite（纯标准库实现，阶段 1 / CA-1）。
-  masklite 与主仓 cipher/mask 的等价性由 G2 golden 向量逐字节锁定
+  cipher/mask 为受控双份：网关仓库包原样保留，本库自带 masklite（纯标准库实现，阶段 1 / CA-1）。
+  masklite 与网关仓库 cipher/mask 的等价性由 G2 golden 向量逐字节锁定
   （masklite/testdata/stream.golden，由 scripts/gen_stream_golden.go 生成）。
-  主仓 cipher/mask 的 Stream / hmacPRG / Next 一旦变更，须重跑
+  网关仓库 cipher/mask 的 Stream / hmacPRG / Next 一旦变更，须重跑
   scripts/gen_stream_golden.go 并同步 masklite/testdata/stream.golden，
   golden 变更由两侧同批评审。

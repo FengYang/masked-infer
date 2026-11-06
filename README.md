@@ -11,7 +11,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 ## 状态
 
 - **阶段 0 骨架与阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）已完成；阶段 2–4 待执行。**
-- 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取主仓 origin 所属账号
+- 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取网关仓库 origin 所属账号
   `FengYang`，CI 变量 `SUB_ORG` 可覆写。
 - `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
 - 仓库只做本地 commit 留痕：无 remote、无 tag、未推送任何远端。
@@ -32,25 +32,25 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 
 ## 依赖方向与固定不变量
 
-- **依赖方向：网关 → 新库**。网关（主仓 `security-ai-gateway`）定义薄接入层并消费
+- **依赖方向：网关 → 新库**。网关（`security-ai-gateway`）定义薄接入层并消费
   本库引擎；本库不得反向 import 网关的 `orchestrator` / `cryptop` / `cipher/mask`，
-  由 G1 门禁强制（含 `_test.go` 闭包，防 `go mod tidy` 把主仓裸名写进 `go.mod`）。
+  由 G1 门禁强制（含 `_test.go` 闭包，防 `go mod tidy` 把网关仓库裸名写进 `go.mod`）。
 - **INV-1 词表归网关**：Tokenizer / Embedding / LM head / argmax 采样留在网关（①）；
   本库是与词表无关的掩码隐状态变换引擎（吃网关加掩后的 embedding，吐掩码末层隐状态）。
 - **INV-3 信任锚归网关**：密钥管理 / 远程证明 / attestation 在网关 `cryptop`，不进本库；
   `tee-infer-service` 为路由无关的通用可信运行时，不迁入本库，以宿主身份 import 本库引擎。
 - **CUDA 与昇腾双一等公民**：`ACCEL_BACKEND_LIB=cuda` / `ascend` 两条构建轨道并列，
   cgo / !cgo 双版本 build tag 迁移时不得丢失（CI matrix）。
-- `cipher/mask` 采取受控双份：主仓原样保留，本库 `masklite` 自带纯标准库实现，两侧由
-  G2 golden 逐字节比对兜底；主仓 `cipher/mask` 变更须重跑 golden 并两侧同批评审。
+- `cipher/mask` 采取受控双份：网关仓库原样保留，本库 `masklite` 自带纯标准库实现，两侧由
+  G2 golden 逐字节比对兜底；网关仓库 `cipher/mask` 变更须重跑 golden 并两侧同批评审。
 
 ## 门禁与 CI
 
 - **G1**（阶段 0 起常驻）：`scripts/gate_g1.sh`，`GOWORK=off` 下
-  `go list -test -deps -f '{{.ImportPath}}' ./...`，禁止主仓裸名前缀、
+  `go list -test -deps -f '{{.ImportPath}}' ./...`，禁止网关仓库裸名前缀、
   `github.com/<org>/security-ai-gateway/` 前缀与 `github.com/emmansun/gmsm` 命中。
 - **G2**（阶段 1 起常驻）：`masklite` 单测对 `masklite/testdata/stream.golden` 逐字节断言；
-  真机侧 `scripts/verify_golden_against_main.go` 引用主仓 `cipher/mask.NewStreamDomain` 复核。
+  真机侧 `scripts/verify_golden_against_main.go` 引用网关仓库 `cipher/mask.NewStreamDomain` 复核。
   阶段 1 起 `masklite/*.go` 已落地，G2 由单元测试常驻守护，不再只是向量文件。
 - `.github/workflows/ci.yml`：所有 job 显式 `GOWORK=off`，Go `1.26.0`；
   `g1` / `g2` / `test`（`go vet` + `go test`）/ `build`（CGO_ENABLED 0/1）/
@@ -62,14 +62,14 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
   import 改写前做闭包 4 项计数强比对（默认弱校验，计数漂移不判红）。
 - `bash scripts/verify_all.sh -remote` 是 **门控 1–5 的共用真机入口**（阶段 1/3/4 复用
   同一脚本同一段），**仅在阶段 1+ 且 Go 1.26 真机可用时执行**：新库侧 `GOWORK=off`、
-  主仓侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
+  网关仓库侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
 - **阶段 0 / 1 只跑静态段**：真机段（`go build`、G1 真机判绿、cgo/!cgo 与 CUDA/昇腾双构建、
   门控 1–5）一律标「🖥 待环境就绪（未取证）」；静态段 `[STATIC-PASS]` 不得冒充门控判绿。
 
 ## 联调说明
 
-主仓侧 `go.work` 由执行人**本地创建、不提交、不进 CI**（本库 `.gitignore` 已列出
-`go.work` / `go.work.sum`；主仓 `.gitignore` 不作任何改动）。CI 一律 `GOWORK=off`，
+网关仓库侧 `go.work` 由执行人**本地创建、不提交、不进 CI**（本库 `.gitignore` 已列出
+`go.work` / `go.work.sum`；网关仓库 `.gitignore` 不作任何改动）。CI 一律 `GOWORK=off`，
 `replace` 不进 `go.mod`。
 
 ## 许可

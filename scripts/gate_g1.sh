@@ -3,9 +3,9 @@
 #
 # 判据：含测试的依赖闭包（go list -test -deps ./...）中，禁止出现
 #   1) 主仓裸名前缀 "${MAIN_MOD}/"（当前为 security-ai-gateway/）；
-#   2) 主仓改名（D4a）后的域名前缀 "github.com/${SUB_ORG}/security-ai-gateway/"；
+#   2) 主仓改名后的域名前缀 "github.com/${SUB_ORG}/security-ai-gateway/"；
 #   3) 国密库 "github.com/emmansun/gmsm"。
-# 双前缀 + MAIN_MOD 可注入，保证 D4a 改名后不漏报。
+# 双前缀 + MAIN_MOD 可注入，保证改名后不漏报。
 #
 # 加固点（相对前稿 `... | grep ... && exit 1 || true`）：
 #   - set -euo pipefail + 临时文件：go list 自身失败不会被 `|| true` 吞掉而静默判绿；
@@ -20,7 +20,7 @@
 #   本门禁只负责新库侧「防未来新增链」，不负责修当前主仓。
 set -euo pipefail
 
-MAIN_MOD=${MAIN_MOD:-security-ai-gateway}      # D4a 改名后由 CI 注入新 path
+MAIN_MOD=${MAIN_MOD:-security-ai-gateway}      # 改名后由 CI 注入新 path
 SUB_ORG=${SUB_ORG:-FengYang}                   # 覆写点：CI 变量 / 建仓组织配置
 export GOWORK=off
 

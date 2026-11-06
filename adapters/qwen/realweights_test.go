@@ -1,4 +1,4 @@
-// realweights_test.go — 真实权重 golden 门控（D2 完成判据①②）
+// realweights_test.go — 真实权重 golden 门控（完成判据①②）
 //
 // 【为什么必须有这一层】本包的三条路径（ForwardMasked 形态B / ForwardRef 参照浮点 /
 // orchestrator 的形态A）共用同一份前向实现，互相对拍只能证明"掩码链路没写错"，
@@ -7,7 +7,7 @@
 // 故取独立实现（transformers fp32 CPU）产出的 golden 作锚点，见
 // scripts/gen-qwen3-golden.py 与 testdata/qwen3-06b-golden.json。
 //
-// 【门槛设计】权重不在本机时 Skip（不伪造 PASS），并在 skip 消息里写明"D2 未执行"。
+// 【门槛设计】权重不在本机时 Skip（不伪造 PASS），并在 skip 消息里写明" 未执行"。
 // CI 无真实权重，本用例在 CI 恒 Skip；它由"发布/里程碑验收"环节显式执行：
 //
 //	ROUTE2_QWEN_DIR=.tools/models/Qwen3Guard-Gen-0.6B \
@@ -49,7 +49,7 @@ type goldenFile struct {
 	Logits   []float64 `json:"logits"`
 }
 
-// TestRealWeightsGolden 真实 Qwen3 权重 × 外部参考对拍（D2 门控）。
+// TestRealWeightsGolden 真实 Qwen3 权重 × 外部参考对拍（门控）。
 //
 // 断言三件事：
 //  1. 结构自洽：内置 Qwen3_06B() 预设与 golden 记录的 config 一致（防 preset 漂移）；

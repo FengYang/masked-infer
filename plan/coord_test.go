@@ -1,4 +1,4 @@
-// coord_test.go - Wire 定宽/字典序/唯一性/解析 契约测试（T01 验收项 1、2）
+// coord_test.go - Wire 定宽/字典序/唯一性/解析 契约测试（验收项 1、2）
 package route2plan
 
 import (

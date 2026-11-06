@@ -128,7 +128,7 @@ assert_run() {
 # 之上，追加「输出不得含 --- SKIP」。
 #
 # 为什么必须单独有这一层：门控 3 的 TestRoute2StepRealQwenGolden 在模型权重不在本机时
-# 主动 t.Skip（其头注写明「权重不在本机时 Skip，写明 D2 未执行，不伪造 PASS」）。
+# 主动 t.Skip（其头注写明「权重不在本机时 Skip，写明未执行，不伪造 PASS」）。
 # 若只判「=== RUN 存在」，该用例会：=== RUN 有 → assert_run 判过 → 门控 3 判过 →
 # 段末照打 [REMOTE-PASS]，直接把「SKIP = 未取证」洗成「门控已取证」，与门控规范直接冲突。
 #

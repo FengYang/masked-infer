@@ -1,4 +1,4 @@
-// model_weights_test.go - 权重派生确定性 / 非方阵 / 与 LayerWeights 共存 / maskedinfer 冒烟（T01 验收项 5、6）
+// model_weights_test.go - 权重派生确定性 / 非方阵 / 与 LayerWeights 共存 / maskedinfer 冒烟（验收项 5、6）
 package route2demo
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/FengYang/masked-infer/plan"
 )
 
-// demoCfg 测试用配置：直接引用 T01 的唯一常量源，禁止在本文件里另抄一份数字。
+// demoCfg 测试用配置：直接引用 的唯一常量源，禁止在本文件里另抄一份数字。
 func demoCfg() route2plan.ModelConfig {
 	return route2plan.DemoTinyConfig()
 }
@@ -155,7 +155,7 @@ func TestLMHeadNonSquareRoundTrip(t *testing.T) {
 
 // TestQuantizedMatrixPipelineSmoke 派生出的 QuantizedMatrix 必须能被
 // MaskImage / CipherLinear / Unmask / Decode 正常处理：这证明数据形态合法，
-// 后续 T02/T03 的 operator 接线才是安全的。
+// 后续 operator 接线才是安全的。
 //
 // 次序铁律：ToMaskDomain → CipherLinear → MaskImage → Unmask → Decode
 // （绝不可先乘 scale 后取模，也不可省掉 MaskImage）。
@@ -230,7 +230,7 @@ func TestMaskImageExcludesBias(t *testing.T) {
 	assertClose(t, "含 bias 时 Unmask→Decode == PlainLinear", decoded, plain, 1e-3)
 }
 
-// TestLayerWeightsStillWorks 既有 LayerWeights 必须仍然可用且未受影响（D15 保留不删）。
+// TestLayerWeightsStillWorks 既有 LayerWeights 必须仍然可用且未受影响（保留不删）。
 func TestLayerWeightsStillWorks(t *testing.T) {
 	a, err := LayerWeights(0, DefaultDim)
 	if err != nil {

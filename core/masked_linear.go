@@ -21,7 +21,7 @@ const (
 // DefaultModulusBits 默认 2^32，以保持与既有掩码生成基础设施
 // （maskVector / newLayerStream 走 uint64 2^32）兼容，服务侧零改动。
 // 生产路径请用 NewQuantizedMatrixMod(..., Mod64) 显式启用 2^64 + int128 累加，
-// 并在服务侧把掩码流/掩码生成升级到 2^64（见 M1 接线任务）。
+// 并在服务侧把掩码流/掩码生成升级到 2^64（见 接线任务）。
 const DefaultModulusBits = Mod32
 
 // InputScale 输入定点缩放 S（与 ToMaskDomain 一致）。默认 1e6。
@@ -92,7 +92,7 @@ func newQuantizedMatrix(weights [][]float64, bitWidth int, modBits MaskModulusBi
 // WithBias 附加量化 bias。
 // 偏置在整数累加器中的正确单位应为 b·S/scale：Decode 以 ×scale/S 还原，
 // bias_int·scale/S = (b·S/scale)·scale/S = b，偏置方可无损还原。
-// （早期实现用 b/scale，会使偏置在 Decode 后被缩小 S 倍而失真；此修正与 M0 整数域先脱掩码一致。）
+// （早期实现用 b/scale，会使偏置在 Decode 后被缩小 S 倍而失真；此修正与 整数域先脱掩码一致。）
 func (m *QuantizedMatrix) WithBias(bias []float64) *QuantizedMatrix {
 	m.Bias = make([]int32, len(bias))
 	for i, b := range bias {

@@ -1,4 +1,4 @@
-// attention_test.go - 可信域 attention 算子测试（T02 验收项 3、4）
+// attention_test.go - 可信域 attention 算子测试（验收项 3、4）
 package trustedops
 
 import (
@@ -250,7 +250,7 @@ func TestScoresRejectsBadShapes(t *testing.T) {
 	}
 }
 
-// TestCausalMaskValue 因果掩码必须写 -1e30（有限值），而不是 -Inf（D9 / R9）。
+// TestCausalMaskValue 因果掩码必须写 -1e30（有限值），而不是 -Inf（R9）。
 func TestCausalMaskValue(t *testing.T) {
 	if math.IsInf(CausalMaskValue, 0) {
 		t.Fatalf("CausalMaskValue 不得为 Inf：%v", CausalMaskValue)
@@ -293,7 +293,7 @@ func TestCausalMaskFutureBlocked(t *testing.T) {
 
 // TestSoftmaxNoNaNAllMasked 边界用例（验收项 4）：整行全掩码时不得产生 NaN。
 //
-// 这正是 D9 选 -1e30 而非 -Inf 的原因：-Inf 在 Softmax 里会得到 `-Inf - (-Inf)` = NaN。
+// 这正是 选 -1e30 而非 -Inf 的原因：-Inf 在 Softmax 里会得到 `-Inf - (-Inf)` = NaN。
 func TestSoftmaxNoNaNAllMasked(t *testing.T) {
 	// -1e30 全掩码行：softmax 退化为均匀分布
 	row := []float64{CausalMaskValue, CausalMaskValue, CausalMaskValue, CausalMaskValue}
@@ -310,7 +310,7 @@ func TestSoftmaxNoNaNAllMasked(t *testing.T) {
 		}
 	}
 
-	// 对照组：用 -Inf 直接喂 trustedops.Softmax 必须真的产生 NaN——这是 D9 的存在理由，
+	// 对照组：用 -Inf 直接喂 trustedops.Softmax 必须真的产生 NaN——这是 的存在理由，
 	// 若哪天这个断言失败（Softmax 变了），说明 -1e30 约定可以重新评估。
 	raw := Softmax([]float64{math.Inf(-1), math.Inf(-1)})
 	hasNaN := false

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// ---------- 模型配置（T01 的 demo 真值源，勿在别处再抄一份数字） ----------
+// ---------- 模型配置（的 demo 真值源，勿在别处再抄一份数字） ----------
 
 // ModelConfig 模型结构配置。同一份 cfg 必须同时喂给：
 //   - 客户端编排器（决定 offload 哪些投影矩阵、行维度多少）；
@@ -14,7 +14,7 @@ import (
 // 两侧一旦数字不一致，表现为「层序校验全绿但数值全错」——即上文所述最坏失败模式。
 // 故本结构体必须由 Build(cfg) 消费，禁止在调用点的代码里写死维度。
 type ModelConfig struct {
-	// ModelID 模型标识。决定权重派生盐、维度与模数；T03 首次请求后冻结，
+	// ModelID 模型标识。决定权重派生盐、维度与模数； 首次请求后冻结，
 	// 变更⇒recompute_model_mismatch。字符集受限以保证派生 key 无歧义。
 	ModelID string
 	// Blocks Transformer block 数量，取值 1..MaxModelBlocks。
@@ -32,7 +32,7 @@ type ModelConfig struct {
 	// GQA 下 K/V 投影输出宽度 = KVHeads*HeadDim（< Dim），注意力前需把 KV 从 KV 头布局
 	// 扩展回 Q 头布局（见 trustedops.ExpandGQA 与 route2step 注意力分支）。
 	KVHeads int
-	// FFNDim FFN 升维宽度（D4：无门控 MLP，up: Dim→FFNDim，down: FFNDim→Dim）。
+	// FFNDim FFN 升维宽度（无门控 MLP，up: Dim→FFNDim，down: FFNDim→Dim）。
 	FFNDim int
 	// FFNType FFN 结构类型："" 或 "gelu" 退化为经典无门控 MLP（up→GELU→down）；
 	// "swiglu" 走门控 FFN（up / gate / silu(gate)⊙up / down），真实 Qwen3 即此结构。
@@ -42,7 +42,7 @@ type ModelConfig struct {
 	Vocab int
 	// NormEps RMSNorm 的 epsilon，> 0。
 	NormEps float64
-	// RopeTheta RoPE 基频（D8 默认 1e4），> 0。
+	// RopeTheta RoPE 基频（默认 1e4），> 0。
 	RopeTheta float64
 	// RopeStyle Q/K 旋转的配对约定："" 或 "interleaved" 为**相邻对** (2i, 2i+1)
 	// （GPT-J/NeoX 风格，demo 默认，保证零改动）；"half" 为**前后半劈** (i, i+headDim/2)
@@ -61,7 +61,7 @@ type ModelConfig struct {
 // 配置取值域边界（fail-closed：Validate 一律拦截越界）。
 const (
 	// MaxModelBlocks 上界由两项约束决定：① 收尾步要用哨兵块号 cfg.Blocks，
-	// 必须落在 Block 的定宽 4 位之内；② demo 规模（D6/D7）远小于此。
+	// 必须落在 Block 的定宽 4 位之内；② demo 规模远小于此。
 	MaxModelBlocks = MaxBlock - 1 // 9998
 	// MaxModelDim 单请求行维度上界（既有 4096 总上限不动，此处仅防配置笔误）。
 	MaxModelDim = 65535
@@ -95,7 +95,7 @@ const (
 	RopeStyleHalf = "half"
 )
 
-// ---- DemoTiny：demo 模型的**唯一配置常量源**（D6） ----
+// ---- DemoTiny：demo 模型的**唯一配置常量源** ----
 //
 // 客户端与服务端一律引用本值（或直接引用 DemoTinyConfig()），禁止各自再抄一份数字：
 // 抄写漂移会让「两边都对」变成「掩码/维度错配而全绿通过」。
