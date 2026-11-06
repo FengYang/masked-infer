@@ -260,7 +260,7 @@ func TestM0RegressionGate(t *testing.T) {
 	}
 }
 
-// TestM0ModChoice 锁定 §7.7 决策：同 dim=4096，Mod64 误差 << Mod32（exp2 结论）。
+// TestM0ModChoice 锁定决策：同 dim=4096，Mod64 误差 << Mod32（exp2 结论）。
 // Mod64 必须干净通过；Mod32+S=1e6 必须仍崩坏（否则 exp2 结论被推翻）。
 func TestM0ModChoice(t *testing.T) {
 	rng := rand.New(rand.NewSource(777))

@@ -1,4 +1,4 @@
-// realweights_test.go — 真实权重 golden 门控（方案 §6.2·D2 / §8.2 完成判据①②）
+// realweights_test.go — 真实权重 golden 门控（D2 完成判据①②）
 //
 // 【为什么必须有这一层】本包的三条路径（ForwardMasked 形态B / ForwardRef 参照浮点 /
 // orchestrator 的形态A）共用同一份前向实现，互相对拍只能证明"掩码链路没写错"，

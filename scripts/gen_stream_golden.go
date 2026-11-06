@@ -1,6 +1,6 @@
 //go:build ignore
 
-// gen_stream_golden.go —— G2 掩码流 golden 向量生成器（§5 阶段 0）。
+// gen_stream_golden.go —— G2 掩码流 golden 向量生成器（阶段 0）。
 //
 // 纯标准库实现，逐字节复刻主仓 cipher/mask 的真实算法（mask.go L57–L184）：
 //   - candidate_k = HMAC-SHA256(seed, BE64(k) || domain)[:8]

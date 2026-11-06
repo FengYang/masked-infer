@@ -283,7 +283,7 @@ func TestMaskDomainFormat(t *testing.T) {
 }
 
 // TestInjectDomainContainsStageTurn 注入域必须把 Stage/Turn 编进去，
-// 否则同一 ρ_inj 会被多轮复用（§0.4 一步一掩码）。
+// 否则同一 ρ_inj 会被多轮复用（一步一掩码）。
 func TestInjectDomainContainsStageAndTurn(t *testing.T) {
 	d0, err := InjectDomain(StagePrefill, 0)
 	if err != nil {

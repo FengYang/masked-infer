@@ -13,7 +13,7 @@
 // 它**永远看不到任何明文激活**。
 //
 // 因此把 `Q·Kᵀ` 与 `scores·V` 放在可信域不是 M2 的退让——整条链路的安全性完全押在
-// 可信域上，而不是押在"注意力机制被加密"上（设计 §0.1/§0.2/D1）。
+// 可信域上，而不是押在"注意力机制被加密"上（D1）。
 // 由本文件导出的算子若被放到可信域之外调用，等于把 `Q·Kᵀ` 的明文结果交出去，
 // 属于信任模型破坏，不是性能取舍。
 //
@@ -47,7 +47,7 @@ import (
 	"math"
 )
 
-// CausalMaskValue 因果掩码哨兵值：** -1e30 而非 -Inf **（设计 §2.6 D9 / 风险表 R9）。
+// CausalMaskValue 因果掩码哨兵值：** -1e30 而非 -Inf **（D9 / 风险表 R9）。
 //
 // 原因写在 nonlinear.go 的 Softmax 实现里（`nonlinear.go:27-43`）：
 //
@@ -61,7 +61,7 @@ const CausalMaskValue = -1e30
 
 // RoPEPair 对第 pairIdx 对分量做旋转位置编码（RoPE）。
 //
-// 采用 Su et al. (2021) 的**相邻对旋转**形式（设计 §2.6 D8「成对旋转」）：
+// 采用 Su et al. (2021) 的**相邻对旋转**形式（D8「成对旋转」）：
 //
 //	θ_i = pos · theta^(-2i/headDim)          i = pairIdx
 //	x'  = x·cosθ_i - y·sinθ_i
@@ -247,7 +247,7 @@ func WeightedSum(probs [][]float64, vRows [][]float64, heads, headDim int) ([]fl
 	return out, nil
 }
 
-// Attention 组合算子（全注意核，设计 §3.2 Ⓐ）：
+// Attention 组合算子（全注意核，Ⓐ）：
 //
 //	foreach head: S = Q'·K_cacheᵀ/√hd → 因果掩码(-1e30) → Softmax → O_head = Σ_j p·V_cache,j
 //	返回 concat(O_head)
@@ -262,7 +262,7 @@ func WeightedSum(probs [][]float64, vRows [][]float64, heads, headDim int) ([]fl
 // 【位置纪律 · 最容易静默写错的地方】RoPE 必须作用在 Q/K 上且**在 KV 追加之前**完成：
 // RoPE 是按**绝对位置**旋转的：若把未旋转的 K 写进缓存、等到读的时候才旋转，
 // 就会出现「同一行被重复旋转」或「Q/K 位置错位」——二者都不报错，
-// 只表现为困惑度莫名劣化（设计 §2.6 D8 / §3.2 序 3-4）。
+// 只表现为困惑度莫名劣化（D8 / 序 3-4）。
 func Attention(q []float64, kRows, vRows [][]float64, heads, headDim, kvStart, qPos int, causal bool) ([]float64, error) {
 	if len(kRows) != len(vRows) {
 		return nil, fmt.Errorf("teecore: K/V 行数不一致 %d != %d", len(kRows), len(vRows))

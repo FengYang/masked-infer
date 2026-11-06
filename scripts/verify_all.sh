@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify_all.sh —— §5 阶段 0 一键复验（本地静态段 + 🖥 真机段）。
+# verify_all.sh —— 阶段 0 一键复验（本地静态段 + 🖥 真机段）。
 #
 # ⚠ 真机 192.168.31.248 SSH 当前不可用，真机段未取证；
 #   **禁止把静态段 [STATIC-PASS] 冒充门控 1–5 PASS**。
@@ -27,7 +27,7 @@ BASELINE_MODE=0
 if [ "${1:-}" = "-baseline" ] || [ "${VERIFY_BASELINE:-0}" = "1" ]; then
   BASELINE_MODE=1
 fi
-# REMOTE_SKIPS：真机段门控累计的 SKIP 用例数（§5.1：SKIP 按「未取证」，不得据此宣称 PASS）。
+# REMOTE_SKIPS：真机段门控累计的 SKIP 用例数（SKIP 按「未取证」，不得据此宣称 PASS）。
 # 门控一律用 assert_run_strict（发现 SKIP 立即 die）；段末再独立复扫全部 gate*.log 兜底，
 # 只要 >0 就禁止输出 [REMOTE-PASS]（防某个门控漏改 strict 仍在段末宣称全取证）。
 REMOTE_SKIPS=0
@@ -119,18 +119,18 @@ assert_run() {
   fi
   # SKIP 只告警不改判（宽松版语义）；同样缩进容忍，子测试 Skip 输出为 `    --- SKIP: TestX/sub`。
   if grep -qE '^[[:space:]]*--- SKIP' "$log"; then
-    warn "${label} 存在 SKIP 用例：按 §5.1 判未取证，不得据此宣称 PASS"
+    warn "${label} 存在 SKIP 用例：按门控规范判未取证，不得据此宣称 PASS"
   fi
 }
 
 # assert_run_strict <log> <label> [必须实跑的测试函数名...]
-# 门控专用断言（§5.1）：在 assert_run 的三重断言（有 RUN / 条数 >= 目标数 / 逐名命中）
+# 门控专用断言：在 assert_run 的三重断言（有 RUN / 条数 >= 目标数 / 逐名命中）
 # 之上，追加「输出不得含 --- SKIP」。
 #
 # 为什么必须单独有这一层：门控 3 的 TestRoute2StepRealQwenGolden 在模型权重不在本机时
 # 主动 t.Skip（其头注写明「权重不在本机时 Skip，写明 D2 未执行，不伪造 PASS」）。
 # 若只判「=== RUN 存在」，该用例会：=== RUN 有 → assert_run 判过 → 门控 3 判过 →
-# 段末照打 [REMOTE-PASS]，直接把「SKIP = 未取证」洗成「门控已取证」，与 §5.1 直接冲突。
+# 段末照打 [REMOTE-PASS]，直接把「SKIP = 未取证」洗成「门控已取证」，与门控规范直接冲突。
 #
 # 注意：静态段的自检（GUARD-SELFTEST / GUARD-POS / GUARD-NEG）继续用宽松的 assert_run，
 # 那里是「断言函数本身的行为」而非门控取证，不能套 strict（否则会自证循环）。
@@ -146,7 +146,7 @@ assert_run_strict() {
     skips="$(grep -cE '^[[:space:]]*--- SKIP' "$log" || true)"
     skips="${skips:-0}"
     REMOTE_SKIPS=$((REMOTE_SKIPS + skips))
-    die "${label} 存在 ${skips} 条 --- SKIP 用例：按 §5.1 判未取证，不得宣称 PASS（段末判绿标记已被阻止）"
+    die "${label} 存在 ${skips} 条 --- SKIP 用例：按门控规范判未取证，不得宣称 PASS（段末判绿标记已被阻止）"
   fi
 }
 
@@ -595,7 +595,7 @@ DUMMYEXITGO
 #     * 两者都避开后，才能防「-run 无匹配却 exit 0」的恒假 PASS。
 #   - assert_run 同时断言实跑条数 >= -run 目标数并逐名核对，防「只跑一个也算过」
 #   - 门控 1–5 一律用 assert_run_strict（额外禁止 --- SKIP），并在段末独立复扫
-#     gate*.log 兜底：SKIP = 未取证（§5.1），绝不允许洗完再打 [REMOTE-PASS]。
+#     gate*.log 兜底：SKIP = 未取证，绝不允许洗完再打 [REMOTE-PASS]。
 # ---------------------------------------------------------------------------
 run_remote() {
   echo "== 🖥 真机段（Go 1.26 / 192.168.31.248；仅阶段 1+）=="
@@ -715,7 +715,7 @@ run_remote() {
   done
   total_skips=$((REMOTE_SKIPS + local_gate_skips))
   if [ "$total_skips" -gt 0 ]; then
-    die "真机段累计 ${total_skips} 条 --- SKIP 用例（strict 计数=${REMOTE_SKIPS}，日志复扫=${local_gate_skips}）：按 §5.1 判未取证，禁止输出段末判绿标记"
+    die "真机段累计 ${total_skips} 条 --- SKIP 用例（strict 计数=${REMOTE_SKIPS}，日志复扫=${local_gate_skips}）：按门控规范判未取证，禁止输出段末判绿标记"
   fi
   # 文案不得超出实际取证范围：阶段 1/2 门控 3 新库侧按设计未启用（测试文件阶段 3 才迁入），
   # 此时不能笼统宣称「门控 1–5 已实际取证」，须显式标出哪一项未启用。

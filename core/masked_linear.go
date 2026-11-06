@@ -9,7 +9,7 @@ import (
 )
 
 // MaskModulusBits 选择掩码模 R 的位宽。
-// 路线 2 技术方案 §7.7 定案：生产首选 2^64（int128 累加）+ 输入定点 S=1e6；
+// 定案：生产首选 2^64（int128 累加）+ 输入定点 S=1e6；
 // 2^32 在 S=1e6 下 headroom 不足（exp2 实测全部崩坏），仅作无 int128 加速器的兜底（须降 S）。
 type MaskModulusBits int
 
@@ -21,7 +21,7 @@ const (
 // DefaultModulusBits 默认 2^32，以保持与既有掩码生成基础设施
 // （maskVector / newLayerStream 走 uint64 2^32）兼容，服务侧零改动。
 // 生产路径请用 NewQuantizedMatrixMod(..., Mod64) 显式启用 2^64 + int128 累加，
-// 并在服务侧把掩码流/掩码生成升级到 2^64（见 §7.7 与 M1 接线任务）。
+// 并在服务侧把掩码流/掩码生成升级到 2^64（见 M1 接线任务）。
 const DefaultModulusBits = Mod32
 
 // InputScale 输入定点缩放 S（与 ToMaskDomain 一致）。默认 1e6。
@@ -167,7 +167,7 @@ func (m *QuantizedMatrix) linearMod(v []uint64, addBias bool) []uint64 {
 }
 
 // CipherLinear 密文线性内核：y = W_q·V + b_q (mod R)，整数域（不先乘 scale）。
-// 修正（路线 2 技术方案 §7.1/§7.7）：先整数域脱掩码、后缩放。
+// 修正：先整数域脱掩码、后缩放。
 // 生产 GPU 内核用 __int128 累加；此处用 uint64 回绕（Mod64）等价实现，见 linearMod。
 func (m *QuantizedMatrix) CipherLinear(V [][]uint64) ([][]uint64, error) {
 	out := make([][]uint64, len(V))

@@ -1,10 +1,10 @@
 //go:build ignore
 
-// check_import_closure.go —— 语法级 AST import 闭包基线扫描（§5 阶段 0 基线模式）。
+// check_import_closure.go —— 语法级 AST import 闭包基线扫描（阶段 0 基线模式）。
 //
 // 背景：真机 192.168.31.248 SSH 当前不可用，`go list -deps` 取证受阻。本工具用
 // go/parser 对源码做语法级 AST 解析（不是正则），产出可复现的 import 闭包基线，
-// 为 §5 阶段 3/4 的 import 路径全局改写提供完备性证据。
+// 为 阶段 3/4 的 import 路径全局改写提供完备性证据。
 //
 // 本文件带 //go:build ignore：不进入新库 go list -test -deps ./... 的 G1 闭包。
 // 纯标准库、只读：不修改被扫描仓库的任何文件。
@@ -43,7 +43,7 @@ import (
 	"strings"
 )
 
-// groupKeys 为方案 §3.1 的 8 个被迁出包（短键按原文登记，匹配时用包含判定）
+// groupKeys 为 8 个被迁出包（短键按原文登记，匹配时用包含判定）
 // + cipher/mask 命中清单，共 9 个闭集分组键。
 var groupKeys = []string{
 	"gateway/teecore/maskedinfer",

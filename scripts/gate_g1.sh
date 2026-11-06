@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G1 新库依赖门禁 —— 《路线2-独立代码库拆分方案》§5.1，自 §5 阶段 0 起常驻。
+# G1 新库依赖门禁 —— 《路线2-独立代码库拆分方案》，自 阶段 0 起常驻。
 #
 # 判据：含测试的依赖闭包（go list -test -deps ./...）中，禁止出现
 #   1) 主仓裸名前缀 "${MAIN_MOD}/"（当前为 security-ai-gateway/）；
@@ -15,7 +15,7 @@
 # 【为何主仓侧此时不加 "cipher/mask ↛ cryptop" deny 规则】
 #   该依赖当前真实存在（route2step/step_exec.go 的生产代码直接 import cipher/mask，
 #   且其 *mask.Stream 签名把主仓具体类型写进引擎侧 API）。提前加 deny 规则会让
-#   现有代码判红，属误报。它登记为拆库验收判据：待 §5.2 CA-3 把 NewStream 改为
+#   现有代码判红，属误报。它登记为拆库验收判据：待 CA-3 把 NewStream 改为
 #   新库 MaskStream 接口、宿主注入点适配完成后，再启用该规则并作为阶段 3 验收项。
 #   本门禁只负责新库侧「防未来新增链」，不负责修当前主仓。
 set -euo pipefail

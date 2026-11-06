@@ -12,7 +12,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 
 - **阶段 0 骨架与阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）已完成；阶段 2–4 待执行。**
 - 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取主仓 origin 所属账号
-  `FengYang`，CI 变量 `SUB_ORG` 可覆写（见方案 §7）。
+  `FengYang`，CI 变量 `SUB_ORG` 可覆写。
 - `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
 - 仓库只做本地 commit 留痕：无 remote、无 tag、未推送任何远端。
 
@@ -28,7 +28,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 | `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地（阶段 1）：12 个 `.go` |
 | `masklite/` | 纯标准库掩码流（CA-1） | 已落地（阶段 1）：`masklite.go` / `memzero.go` / `masklite_test.go` + `testdata/stream.golden` |
 | `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） | 待迁移（阶段 3） |
-| `backend/` | `MaskedInferenceBackend` 接口与构造器（方案 §4.2，接口定义在新库侧） | 待建（阶段 4） |
+| `backend/` | `MaskedInferenceBackend` 接口与构造器（接口定义在新库侧） | 待建（阶段 4） |
 
 ## 依赖方向与固定不变量
 
@@ -40,7 +40,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 - **INV-3 信任锚归网关**：密钥管理 / 远程证明 / attestation 在网关 `cryptop`，不进本库；
   `tee-infer-service` 为路由无关的通用可信运行时，不迁入本库，以宿主身份 import 本库引擎。
 - **CUDA 与昇腾双一等公民**：`ACCEL_BACKEND_LIB=cuda` / `ascend` 两条构建轨道并列，
-  cgo / !cgo 双版本 build tag 迁移时不得丢失（方案 §6-#2、CI matrix）。
+  cgo / !cgo 双版本 build tag 迁移时不得丢失（CI matrix）。
 - `cipher/mask` 采取受控双份：主仓原样保留，本库 `masklite` 自带纯标准库实现，两侧由
   G2 golden 逐字节比对兜底；主仓 `cipher/mask` 变更须重跑 golden 并两侧同批评审。
 
@@ -55,12 +55,12 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 - `.github/workflows/ci.yml`：所有 job 显式 `GOWORK=off`，Go `1.26.0`；
   `g1` / `g2` / `test`（`go vet` + `go test`）/ `build`（CGO_ENABLED 0/1）/
   `accel`（cuda + ascend，🖥 待环境就绪，本轮禁用）五个 job。
-- **复验脚本分层（跨 §5 全部阶段共用，非阶段 0 专用、不另写新脚本）**：
+- **复验脚本分层（跨全部阶段共用，非阶段 0 专用、不另写新脚本）**：
   `bash scripts/verify_all.sh` 是**本地静态段（默认）**，适用阶段 0–4 全部阶段，覆盖
   gofmt / G1 逻辑自检 / import 闭包三项真门禁 / 国密红线 / 许可自洽 / 仓库可 clone 留证，
   结论统一以 `[STATIC-PASS]` 标注；`bash scripts/verify_all.sh -baseline` 供阶段 3/4
   import 改写前做闭包 4 项计数强比对（默认弱校验，计数漂移不判红）。
-- `bash scripts/verify_all.sh -remote` 是 **§5.1 门控 1–5 的共用真机入口**（阶段 1/3/4 复用
+- `bash scripts/verify_all.sh -remote` 是 **门控 1–5 的共用真机入口**（阶段 1/3/4 复用
   同一脚本同一段），**仅在阶段 1+ 且 Go 1.26 真机可用时执行**：新库侧 `GOWORK=off`、
   主仓侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
 - **阶段 0 / 1 只跑静态段**：真机段（`go build`、G1 真机判绿、cgo/!cgo 与 CUDA/昇腾双构建、
@@ -142,7 +142,7 @@ Still pending: `ref/` (Stage 2), `step/` (Stage 3) and `backend/` (Stage 4).
   script): `bash scripts/verify_all.sh` runs the local static segment by default
   (valid for every stage, results tagged `[STATIC-PASS]`); the `-baseline` mode
   re-checks the import-closure counters before Stage 3/4 import rewrites;
-  `bash scripts/verify_all.sh -remote` is the shared entry point for §5.1 gates 1–5,
+  `bash scripts/verify_all.sh -remote` is the shared entry point for gates 1–5,
   executable only from Stage 1 onward with a Go 1.26 machine. Stages 0 and 1 run the
   static segment only; every machine-side item remains 🖥 environment-pending (no
   evidence collected), and `[STATIC-PASS]` must never be read as a gate 1–5 pass.

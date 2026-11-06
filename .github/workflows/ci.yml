@@ -12,7 +12,7 @@ env:
   GOWORK: off
 
 jobs:
-  # G1 常驻门禁（§5 阶段 0 起）：含 _test.go 的依赖闭包零主仓 / 零 gmsm 前缀。
+  # G1 常驻门禁（阶段 0 起）：含 _test.go 的依赖闭包零主仓 / 零 gmsm 前缀。
   g1:
     name: G1 forbidden-dependency gate
     runs-on: ubuntu-latest

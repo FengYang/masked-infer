@@ -49,7 +49,7 @@ func TestDemoTinyValues(t *testing.T) {
 	if cfg.AttnDim() != cfg.Dim {
 		t.Errorf("AttnDim() = %d, want == Dim=%d", cfg.AttnDim(), cfg.Dim)
 	}
-	// KV 峰值内存估算（§6.1）：2·Blocks·MaxTokens·Dim·8B = 256 KiB
+	// KV 峰值内存估算：2·Blocks·MaxTokens·Dim·8B = 256 KiB
 	bytes := 2 * cfg.Blocks * cfg.MaxTokens * cfg.Dim * 8
 	if bytes != 256*1024 {
 		t.Errorf("KV 峰值内存 = %d B, want %d B（256 KiB）", bytes, 256*1024)

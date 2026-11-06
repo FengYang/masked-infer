@@ -345,7 +345,7 @@ func TestTensorShapeMissuse(t *testing.T) {
 	}
 }
 
-// TestModelWeightsInterface ModelWeights 契约（设计 §2.4.5）可被正常实现与调用。
+// TestModelWeightsInterface ModelWeights 契约可被正常实现与调用。
 func TestModelWeightsInterface(t *testing.T) {
 	var provider ModelWeights
 	w, err := NewWeights(demoCfg())
@@ -456,7 +456,7 @@ func maskWith(t *testing.T, m *maskedinfer.QuantizedMatrix, x []float64) ([]uint
 // roundTrip 完整脱掩码管线：V → CipherLinear → (MaskImage + Unmask) → Decode → float。
 //
 // 次序铁律：①整数域先脱掩码、后缩放；②MaskImage 绝不含 bias；
-// 二者任一写错，本测试就会以 1e-1 量级的偏差炸掉（见设计 §8.1 档 A 的动机）。
+// 二者任一写错，本测试就会以 1e-1 量级的偏差炸掉（见档 A 的动机）。
 func roundTrip(m *maskedinfer.QuantizedMatrix, V, r []uint64) ([]float64, error) {
 	y, err := m.CipherLinear([][]uint64{V})
 	if err != nil {

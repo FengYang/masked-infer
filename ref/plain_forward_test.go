@@ -57,7 +57,7 @@ func requireFinite(t *testing.T, name string, logits [][]float64, wantRows, want
 		}
 		for j, v := range row {
 			if math.IsNaN(v) || math.IsInf(v, 0) {
-				t.Fatalf("%s: logits[%d][%d] = %v 非有限（触发 §8.1 崩坏门禁）", name, i, j, v)
+				t.Fatalf("%s: logits[%d][%d] = %v 非有限（触发崩坏门禁）", name, i, j, v)
 			}
 			if v != first {
 				allSame = false

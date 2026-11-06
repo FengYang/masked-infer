@@ -2,7 +2,7 @@
 //
 // 本包是整个 M2 的**公共契约**：客户端编排器（cmd/route2-client）与可信域服务端
 // （gateway/tee-infer-service）一律依赖本包派生各自的行为，二者不再各自维护一份
-// 层序假设（消灭设计 §2.2 的 G9）。T02/T03/T04 均建立在以下三条硬规则之上：
+// 层序假设（消灭 G9）。T02/T03/T04 均建立在以下三条硬规则之上：
 //
 // 规则 1（字段次序 ≡ 因果次序）：坐标六元组
 //
@@ -15,9 +15,9 @@
 //
 //	otpmask/step/<wire>/v2
 //
-// 坐标互不相同 ⇒ 掩码流互不相同 ⇒ 杜绝两步共用同一个 r（§2.2 G3）。
+// 坐标互不相同 ⇒ 掩码流互不相同 ⇒ 杜绝两步共用同一个 r（G3）。
 // 这是一条**安全性**要求而非整洁性要求：攻击者一旦见到同一个 r 掩盖的两个不同
-// 明文，即可直接求出二者差值（§0.4）。
+// 明文，即可直接求出二者差值。
 //
 // 规则 3（服务端为权威）：plan 是 Build(cfg) 的确定性产物，两端同包共享；
 // 客户端只能请求 plan[pos]，不得提交任何解释性状态（pos / mask_seed /
@@ -45,7 +45,7 @@ import (
 // ---------- Wire 规范串常量 ----------
 
 // WireVersion Wire 规范串的版本前缀。
-// 设计 §2.5.2 方案 B（硬切换 + 版本门禁）裁定：只认 v2；缺 coord 或 proto!=2 的旧
+// 方案 B（硬切换 + 版本门禁）裁定：只认 v2；缺 coord 或 proto!=2 的旧
 // 客户端一律以独立审计码拒绝，不与既有 recompute_layer_mismatch 混淆。
 const WireVersion = "v2"
 
@@ -55,12 +55,12 @@ const (
 	MaskDomainSuffix = "/v2"
 )
 
-// InjectDomainPrefix 客户端第 0 步注入掩码的域前缀（§3.1 记号 ρ_inj）。
+// InjectDomainPrefix 客户端第 0 步注入掩码的域前缀（记号 ρ_inj）。
 //
-// 【实现裁定 · 需团队确认】设计 §3.1 把注入域写成不带参数的 otpmask/inject/v2，
-// 但 §4 的 d0 又写作 ρ_inj(turn=k)——二者不自洽：若 prefill 与全部 decode 轮共用
+// 【实现裁定 · 需团队确认】注入域写成不带参数的 otpmask/inject/v2，
+// 但 d0 又写作 ρ_inj(turn=k)——二者不自洽：若 prefill 与全部 decode 轮共用
 // 一个注入域，则同一 ρ_inj 会被用来掩盖多个不同明文（不同轮的 token 嵌入），
-// 直接违反 §0.4「一步一掩码、绝不重用」。
+// 直接违反「一步一掩码、绝不重用」。
 // 故本实现把 (Stage, Turn) 一并编入注入域，见 InjectDomain()。
 const InjectDomainPrefix = "otpmask/inject/v2"
 
@@ -69,7 +69,7 @@ const wireFieldCount = 7
 
 // wireFieldWidths 六个坐标字段在 Wire 中的**定宽位数**，次序 ≡ 字段因果次序：
 // Stage(1) | Turn(6) | Block(4) | Step(2) | Branch(1) | Chunk(2)。
-// 任何改动都会改变字典序语义，属 §9 明令禁止回头修改的坐标系定义。
+// 任何改动都会改变字典序语义，属明令禁止回头修改的坐标系定义。
 var wireFieldWidths = [6]int{1, 6, 4, 2, 1, 2}
 
 // 取值域上限（同时约束 Validate 与 Wire 的定宽不溢出）。
@@ -77,14 +77,14 @@ const (
 	// MaxStageDigits 由 Stage 定宽 1 位推出，实际合法 Stage 只有 1/2。
 	MaxTurn   uint32 = 999999
 	MaxBlock  uint16 = 9999
-	MaxStep   Step   = 63 // 设计 §2.4.1：Step 取值域 0..63
+	MaxStep   Step   = 63 // Step 取值域 0..63
 	MaxBranch Branch = 9  // 定宽 1 位 ⇒ 0..9
 	MaxChunk  uint16 = 99 // 定宽 2 位 ⇒ 0..99
 )
 
 // ---------- Stage / Step / Branch 枚举 ----------
 
-// Stage 推理阶段。prefill 与 decode 共用同一 HTTP 端点，靠本字段区分（§2.5.5）。
+// Stage 推理阶段。prefill 与 decode 共用同一 HTTP 端点，靠本字段区分。
 type Stage uint8
 
 const (
@@ -113,9 +113,9 @@ func (s Stage) String() string {
 	}
 }
 
-// Step 块内子步枚举。设计 §2.4.1 给出前 6 个（0..5），本实现追加 2 个收尾值。
+// Step 块内子步枚举。给出前 6 个（0..5），本实现追加 2 个收尾值。
 //
-// 【实现补充说明】6 个 Step 槽位无法完整表达 §3.2 的 8 条 plan 条目：
+// 【实现补充说明】6 个 Step 槽位无法完整表达 8 条 plan 条目：
 // kv_append_k / kv_append_v / attention 三者同属 StepKVAppend，靠 Branch
 // （BranchK=0 / BranchV=1 / BranchQ=2）区分，Branch 的取值次序即因果次序。
 // 故「1 block = 6 Step = 8 plan 条目」，见 plan.go 的 StepsPerBlock。
@@ -135,7 +135,7 @@ const (
 	// StepFFNResidual FFN 残差相加（扇入 2 行），输出即下一 block 的输入 h。
 	StepFFNResidual // 05
 
-	// ---- 以下两项为设计 §2.4.1 未列出的收尾步，由 §3.3 的数据流倒逼补全 ----
+	// ---- 以下两项为未列出的收尾步，由本 plan 的数据流倒逼补全 ----
 	// 【实现裁定 · 需团队确认】
 	// StepFinalNorm 收尾 RMSNorm（ln_final），Block 取哨兵值 cfg.Blocks。
 	StepFinalNorm // 06
@@ -298,7 +298,7 @@ func (c LayerCoord) Validate() error {
 // InjectDomain 返回客户端第 0 步注入掩码 ρ_inj 的派生域。
 //
 // 之所以把 (Stage, Turn) 编入：若全部轮次共用一个注入域，则同一个 ρ_inj 会掩盖
-// 多个不同明文（不同轮的 token 嵌入），违反 §0.4 的一步一掩码。
+// 多个不同明文（不同轮的 token 嵌入），违反一步一掩码。
 // 返回串示例：otpmask/inject/v2/2/000013。
 func InjectDomain(stage Stage, turn uint32) (string, error) {
 	if !stage.Valid() {
@@ -315,14 +315,14 @@ func InjectDomain(stage Stage, turn uint32) (string, error) {
 // 与 lenient 解析的区别：本函数①要求段数恰为 7；②要求每段长度恰等于定宽
 // （拒绝 "1|0|0|0|0|0" 这类未补零的写法）；③要求每段全为 ASCII 数字；
 // ④最后过一遍 Validate()。任何一项不过即拒绝，绝不静默纠正——因为
-// 「坐标静默纠正」等价于「掩码域名静默错位」，是最坏的失败模式（§2.5.2）。
+// 「坐标静默纠正」等价于「掩码域名静默错位」，是最坏的失败模式。
 func ParseWire(s string) (LayerCoord, error) {
 	parts := strings.Split(s, "|")
 	if len(parts) != wireFieldCount {
 		return LayerCoord{}, fmt.Errorf("route2plan: Wire %q 段数 %d != %d", s, len(parts), wireFieldCount)
 	}
 	if parts[0] != WireVersion {
-		return LayerCoord{}, fmt.Errorf("route2plan: Wire %q 版本前缀 %q != %q（§2.5.2 硬切换，不接受 v1）",
+		return LayerCoord{}, fmt.Errorf("route2plan: Wire %q 版本前缀 %q != %q（硬切换，不接受 v1）",
 			s, parts[0], WireVersion)
 	}
 	vals := make([]uint64, len(wireFieldWidths))

@@ -10,7 +10,7 @@ import (
 
 // TensorKey 一张有权重/仿射参数张量的标识。
 //
-// 位置说明：设计 §2.4.5 把 TensorKey 与 ModelWeights 同框列出但未指定归属包。
+// 位置说明：把 TensorKey 与 ModelWeights 同框列出但未指定归属包。
 // 本实现把它落在 route2plan 而非 route2demo，理由有二：
 //  1. StepSpec.InWeight 需要引用张量身份，而 route2plan 必须保持「只依赖标准库」
 //     才能被服务端/客户端/测试三方零成本共享；若反向依赖 route2demo（它依赖
@@ -24,7 +24,7 @@ type TensorKey struct {
 	Tensor string
 }
 
-// 合法张量名（设计 §2.4.5）。注意这里刻意用「点号 + 小写」拼写，全局唯一。
+// 合法张量名。注意这里刻意用「点号 + 小写」拼写，全局唯一。
 const (
 	TensorAttnQ   = "attn.q"      // Dim -> Heads*HeadDim，Q 投影
 	TensorAttnK   = "attn.k"      // Dim -> KVHeads*HeadDim（GQA 下窄于 Q），K 投影
@@ -40,7 +40,7 @@ const (
 	TensorKNorm   = "attn.k_norm" // 每 block 的 K 逐头归一 gamma（Qwen3；长度 = HeadDim，所有头共享）
 	TensorLMHead  = "lm_head"     // Dim -> Vocab；非方阵（Rows != Cols）由 QuantizedMatrix 的 Rows/Cols 分离天然支持，无需改动数值内核
 	// TensorTokEmb token 嵌入表：Vocab -> Dim 的查表（Gather），全局一份。
-	// 补录原因（T02 发现的设计漏项）：§2.4.5 的张量枚举原本只有 attn.*/ffn.*/ln_*/lm_head，
+	// 补录原因（T02 发现的设计漏项）：张量枚举原本只有 attn.*/ffn.*/ln_*/lm_head，
 	// 而**没有嵌入就跑不了前向**。客户端注入与服务端 Gather 必须共用同一张表，
 	// 各派生一份是不可接受的（漂移症状是"输出随机错 token"且极难查）。
 	// 它与其他收尾张量一样取哨兵块号 cfg.Blocks（见 route2demo.checkBlockBounds）。
@@ -107,7 +107,7 @@ type WeightRef struct {
 	// false 表示「直通」：残差分支、归一化输入、客户端注入行。
 	// 此时该行携带的掩码就是 ρ_src 本身，不存在线性搬运项，故 Key 无意义。
 	// 这条分支最容易写错：直通行若误去算 MaskImage，会得到一个无意义的掩码像，
-	// 脱掩码结果是乱码且**层序校验全绿**（§2.2 G12 / R2）。
+	// 脱掩码结果是乱码且**层序校验全绿**（G12 / R2）。
 	Applied bool
 	// Key Applied=true 时的权重身份。
 	Key TensorKey
@@ -139,7 +139,7 @@ type CoordRef = int
 // SrcInject InSrc 的下标哨兵：该行来自客户端注入，掩码域为 InjectDomain(Stage, Turn)。
 const SrcInject CoordRef = -1
 
-// 合法 op 名（§7.1 白名单；plan 内出现的一律在此列）。
+// 合法 op 名（白名单；plan 内出现的一律在此列）。
 const (
 	OpRMSNorm     = "rmsnorm"
 	OpGELU        = "gelu"
@@ -191,7 +191,7 @@ func ValidOp(op string) bool {
 type StepSpec struct {
 	// Seq plan 下标，恒等于该 StepSpec 在 Plan 中的位置（冗余字段，便于日志与响应回显）。
 	Seq int
-	// Coord 该步坐标：既是服务端正序校验的键（§2.5.4），也唯一决定本步输出掩码的域。
+	// Coord 该步坐标：既是服务端正序校验的键，也唯一决定本步输出掩码的域。
 	Coord LayerCoord
 	// Op 算子名，取值见 OpRMSNorm..OpResidualAdd。
 	Op string
@@ -229,7 +229,7 @@ func (s StepSpec) String() string {
 
 // Plan 确定性执行序列。== []StepSpec，下标即 Seq，次序即因果次序。
 //
-// 设计约束：本类型为纯切片，不携带 ModelConfig（以免打破 §2.4.2 的签名）；
+// 设计约束：本类型为纯切片，不携带 ModelConfig（以免打破签名约束）；
 // 需要 cfg 的调用方请自行持有——cfg 决定 plan 的形态，plan 不反向记住 cfg。
 type Plan []StepSpec
 
@@ -237,7 +237,7 @@ type Plan []StepSpec
 // 差在 StepKVAppend 有 K/V/Q 三条 Branch，见 coord.go 的 Step 注释）。
 const StepsPerBlock = 8
 
-// TailSteps 收尾条目数：ln_final + argmax（设计 §3.3 的序 13 与序 15）。
+// TailSteps 收尾条目数：ln_final + argmax（序 13 与序 15）。
 const TailSteps = 2
 
 // 每 block 内各条目的相对偏移（GELU 布局；与 Step 枚举值不同，差在 StepKVAppend 的三分支）。
@@ -255,7 +255,7 @@ const (
 // SwiGLU 布局的 block 内相对偏移（仅 FFNType=swiglu 时使用，条目数 = 10）。
 // 前 6 条（attn_norm→ffn_norm）与 GELU 布局完全共用；FFN 尾段改为
 // up(StepFFNUp/BranchMain) → gate(StepFFNUp/BranchV) → swiglu_mul(StepFFNResidual/BranchV)
-// → down(StepFFNResidual/BranchQ)，其 Wire 次序 04b0<04b1<05b1<05b2 严格递增（见 §2.5.1）。
+// → down(StepFFNResidual/BranchQ)，其 Wire 次序 04b0<04b1<05b1<05b2 严格递增（见前文）。
 const (
 	offSwiGLUGate     = 7 // StepFFNUp + BranchV
 	offSwiGLUMul      = 8 // StepFFNResidual + BranchV
@@ -305,7 +305,7 @@ func Build(cfg ModelConfig) (Plan, error) {
 // BuildTurn 生成指定阶段/轮次的 plan。
 //
 // Stage/Turn 的取值约束（fail-closed，偏离即拒）：
-//   - prefill：Stage=1 且 Turn 恒 0（设计 §2.5.5）；
+//   - prefill：Stage=1 且 Turn 恒 0；
 //   - decode ：Stage=2 且 Turn >= 1（Turn=0 被 prefill 独占，防止同一 ρ 被两阶段复用）。
 //
 // 之所以**每个 turn 一份 plan**而非「一份 plan 覆盖全部 turn」：Turn 进入坐标 →
@@ -435,7 +435,7 @@ func BuildTurn(cfg ModelConfig, stage Stage, turn uint32) (Plan, error) {
 				[]WeightRef{RefKey(TensorKey{Block: b, Tensor: TensorFFNDown}), NoWeight()},
 				cfg.Dim, false, false, false)
 		} else {
-			// GELU（默认，§7.9 既有布局，零变化）：up(GELU) → down(残差加)，共 2 条。
+			// GELU（默认，既有布局，零变化）：up(GELU) → down(残差加)，共 2 条。
 			// (6) ffn_up：Up = Wup·V_hn2 + b_up -> GELU -> V_f1，宽 FFNDim。
 			emit(coordOf(blk, StepFFNUp, BranchMain), OpGELU,
 				[]int{cfg.FFNDim}, []int{base + offFFNNorm},
@@ -450,7 +450,7 @@ func BuildTurn(cfg ModelConfig, stage Stage, turn uint32) (Plan, error) {
 		}
 	}
 
-	// ---- 收尾：ln_final + argmax（设计 §3.3）----
+	// ---- 收尾：ln_final + argmax----
 	// 取「最后一个 block 的末步输出」作为 ln_final 的输入（GELU=offFFNResidual / SwiGLU=offSwiGLUResidual）。
 	lastOff := offFFNResidual
 	if cfg.FFNType == FFNTypeSwiGLU {

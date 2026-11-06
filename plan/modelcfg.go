@@ -11,11 +11,11 @@ import (
 //   - 客户端编排器（决定 offload 哪些投影矩阵、行维度多少）；
 //   - 可信域服务端（决定 StepSpec 的行维度校验、KV cache 容量与 derive 方式）。
 //
-// 两侧一旦数字不一致，表现为「层序校验全绿但数值全错」——即 §2.5.2 所述最坏失败模式。
+// 两侧一旦数字不一致，表现为「层序校验全绿但数值全错」——即上文所述最坏失败模式。
 // 故本结构体必须由 Build(cfg) 消费，禁止在调用点的代码里写死维度。
 type ModelConfig struct {
 	// ModelID 模型标识。决定权重派生盐、维度与模数；T03 首次请求后冻结，
-	// 变更⇒recompute_model_mismatch（§7.3）。字符集受限以保证派生 key 无歧义。
+	// 变更⇒recompute_model_mismatch。字符集受限以保证派生 key 无歧义。
 	ModelID string
 	// Blocks Transformer block 数量，取值 1..MaxModelBlocks。
 	Blocks int
@@ -95,7 +95,7 @@ const (
 	RopeStyleHalf = "half"
 )
 
-// ---- DemoTiny：demo 模型的**唯一配置常量源**（设计 §2.6 D6） ----
+// ---- DemoTiny：demo 模型的**唯一配置常量源**（D6） ----
 //
 // 客户端与服务端一律引用本值（或直接引用 DemoTinyConfig()），禁止各自再抄一份数字：
 // 抄写漂移会让「两边都对」变成「掩码/维度错配而全绿通过」。
@@ -116,7 +116,7 @@ const (
 //
 // 【只读约定】本值是全局共享的，调用方必须按值传递（ModelConfig 为纯值类型），
 // 严禁就地修改其字段；需要可变副本请用 DemoTinyConfig()。
-// KV 峰值内存估算（§6.1）：2·4·128·32·8B = 256 KiB。
+// KV 峰值内存估算：2·4·128·32·8B = 256 KiB。
 var DemoTiny = ModelConfig{
 	ModelID:   DemoModelID,
 	Blocks:    DemoBlocks,
@@ -161,7 +161,7 @@ func (c ModelConfig) KVDim() int {
 //
 // 历史上曾把「Heads*HeadDim == Dim」写成硬约束。自真实 Qwen3 接入（T4）起该约束被解除：
 // attention 的 concat-heads 输出宽为 AttnDim，由 Wo([Dim, AttnDim]) 映回 Dim 汇入残差流，
-// K/V 投影输出宽为 KVDim，三者本就无须相等。为免"行维度不匹配"在很靠后才炸（§2.2 G6），
+// K/V 投影输出宽为 KVDim，三者本就无须相等。为免"行维度不匹配"在很靠后才炸（G6），
 // 改由 plan 构造期按 AttnDim/KVDim 精确赋值各步 InDim/OutDim 来保证布局自洽。
 func (c ModelConfig) Validate() error {
 	if err := validateModelID(c.ModelID); err != nil {

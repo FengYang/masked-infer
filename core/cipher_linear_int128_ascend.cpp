@@ -12,7 +12,7 @@
 //       默认以 #if 0 包裹，需 CANN 工具链启用），是真实打上昇腾 NPU 的落点。
 //
 // 昇腾特殊性：Ascend C 无原生 __int128，128 位累加须用两 uint64 (hi/lo) 仿真
-//   （与 Go 侧 add128 同构）；这也正是 §10.5"老架构两 int64 仿真"路线的真机落点。
+//   （与 Go 侧 add128 同构）；这也正是"老架构两 int64 仿真"路线的真机落点。
 //
 // 编译（可移植参考路径，任意机器）：
 //   g++ -shared -fPIC cipher_linear_int128_ascend.cpp -o libaccel_ascend.so
