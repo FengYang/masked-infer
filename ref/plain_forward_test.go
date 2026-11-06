@@ -1,4 +1,4 @@
-// plain_forward_test.go - 双基线参照前向测试（T02 验收项 1、2、5）
+// plain_forward_test.go - 双基线参照前向测试（验收项 1、2、5）
 package route2ref
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/FengYang/masked-infer/plan"
 )
 
-// demoCfg 引用 T01 的唯一常量源（禁止在本文件另抄一份数字）。
+// demoCfg 引用唯一常量源（禁止在本文件另抄一份数字）。
 func demoCfg() route2plan.ModelConfig {
 	return route2plan.DemoTinyConfig()
 }
@@ -121,7 +121,7 @@ func TestGenerateProducesTokens(t *testing.T) {
 	requireFinite(t, "generate", logits, 6, cfg.Vocab)
 }
 
-// TestForwardDeterministic 同一输入两次前向必须逐位相同（§8.1 附加崩坏门禁之一）。
+// TestForwardDeterministic 同一输入两次前向必须逐位相同（附加崩坏门禁之一）。
 func TestForwardDeterministic(t *testing.T) {
 	cfg := demoCfg()
 	toks := demoTokens(6)
@@ -262,7 +262,7 @@ func TestRunnerResetIsolatesSequences(t *testing.T) {
 // TestBaselineDivergence 观测 ref-exact 与 ref-fp32 之间的偏差（= int8 量化噪声）。
 //
 // 【重要·不要把它当成 G2 门禁】这里比较的是**两条参照基线之间的差异**，
-// 而设计 §8.1 的档 A 比较的是「生产掩码管线 vs ref-exact」。二者不是同一件事。
+// 而档 A 比较的是「生产掩码管线 vs ref-exact」。二者不是同一件事。
 //
 // 本用例的做法：
 //   - 用设计原文的档 B 阈值（rtol=5e-2，见 GradeBRtol）作为硬断言——这是设计自己给
@@ -314,7 +314,7 @@ func TestBaselineDivergence(t *testing.T) {
 // 逐项一致（w = Scale*Data，且累加次序相同）。
 //
 // 这条用例的作用是防止"参照实现自己写了一套算子、自带一套 bug"：
-// matVecRows 是 T02 新写的，PlainLinear 是 M0 就在用的内核，二者对得上才说明
+// matVecRows 是新增的，PlainLinear 是既有内核，二者对得上才说明
 // 我们对 int8 去量化的理解与既有内核一致。
 func TestExactWeightsMatchPlainLinear(t *testing.T) {
 	cfg := demoCfg()
@@ -614,7 +614,7 @@ func deterministicVec(n int, seed int64) []float64 {
 
 // TestRefRejectsUnsupportedStructures 参考前向只实现 demo 结构（GELU-MLP / 无 QK-norm / 无 GQA）。
 //
-// 自 T4 起 route2plan.Validate 允许真实 Qwen3 的 SwiGLU / QK-norm / GQA / attnDim≠Dim。
+// route2plan.Validate 允许真实 Qwen3 的 SwiGLU / QK-norm / GQA / attnDim≠Dim。
 // 本参考前向若不拦就会**静默算出错误 logits**（假绿），故必须 fail-closed：
 // 这些结构一律走 adapters/qwen.ForwardRef 取明文真值。
 func TestRefRejectsUnsupportedStructures(t *testing.T) {
@@ -641,7 +641,7 @@ func TestRefRejectsUnsupportedStructures(t *testing.T) {
 			t.Errorf("%s: 参考前向应 fail-closed 拒绝，却被接受", tc.name)
 		}
 	}
-	// 反向护栏：attnDim≠Dim 但仍是 GELU/MHA/无 QK-norm 时必须被接受（T4 放宽后的合法组合）。
+	// 反向护栏：attnDim≠Dim 但仍是 GELU/MHA/无 QK-norm 时必须被接受（放宽后的合法组合）。
 	ok := demoCfg()
 	ok.Heads = 3 // attnDim=24 ≠ Dim=32，其余保持 demo 结构
 	if err := ok.Validate(); err != nil {

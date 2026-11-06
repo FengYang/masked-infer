@@ -1,4 +1,4 @@
-// Package route2ref 双基线**纯浮点**参照前向（T02 · D13）。
+// Package route2ref 双基线纯浮点参照前向：可信域内实现与可信域外浮点参照并行，用于数值对拍。
 //
 // ============================== 它为什么存在 ==============================
 //
@@ -24,7 +24,7 @@
 //
 // 本包**不含任何掩码、定点、模运算**，也不触碰 KV 安全策略、配额、审计。
 // 它是 pemanggil (调用方) teecore 纯函数的计算器：given tokens → logits。
-// 生产路径（T03/T04）不得把本包当成可上线的推理实现——它没有 KV 隔离、
+// 生产路径不得把本包当成可上线的推理实现——它没有 KV 隔离、
 // 没有租户命名空间、没有审计字段。
 //
 // ============================== 与其它包的关系 ==============================
@@ -44,7 +44,7 @@ import (
 	"github.com/FengYang/masked-infer/plan"
 )
 
-// 基线类别名（D13 / §8.1）。
+// 基线类别名。
 const (
 	// KindExact `ref-exact`：用**已去量化的同款 int8 权重**（m.Scale*m.Data）做 fp64 前向。
 	KindExact = "ref-exact"
@@ -162,8 +162,8 @@ func (f *fp32Weights) Affine(k route2plan.TensorKey) ([]float64, float64, error)
 // Runner 参照前向的运行态：KV 缓存 + 位置计数器。
 //
 // 与生产实现的差别：这里的 KV 就是两个 [][]float64，**明文、无租户隔离、无配额**，
-// 因为它必须在可信域之外也能被单测和 CI 直接调用（设计 §8.1 要求 CI 可跑）。
-// 生产路径的 KVCache 由 T03 实现，不得把本结构搬过去当生产实现。
+// 因为它必须在可信域之外也能被单测和 CI 直接调用（要求 CI 可跑）。
+// 生产路径的 KVCache 由阶段 3 实现，不得把本结构搬过去当生产实现。
 type Runner struct {
 	cfg route2plan.ModelConfig
 	w   Weights
@@ -194,7 +194,7 @@ func NewRunner(w Weights, cfg route2plan.ModelConfig) (*Runner, error) {
 // checkRefSupported 拦截本参考前向（demo 版明文实现）无法忠实执行的结构。
 //
 // 本实现硬编码 GELU-MLP、无 QK-norm、KV cache 按 Q 头布局存放（无 GQA 扩展）。
-// 自 T4 起 route2plan.Validate 允许真实 Qwen3 那样的 SwiGLU / QK-norm / GQA / attnDim≠Dim，
+// route2plan.Validate 允许真实 Qwen3 那样的 SwiGLU / QK-norm / GQA / attnDim≠Dim，
 // 若此处不拦，参考前向会**静默算出错误 logits**而不是报错——"两边都对"式的假绿最难查。
 // 故一律 fail-closed，真实 Qwen3 的明文真值请走 adapters/qwen.ForwardRef（它实现了这三者）。
 func checkRefSupported(cfg route2plan.ModelConfig) error {
@@ -226,10 +226,10 @@ func (r *Runner) Reset() {
 // Step 处理一个 batch（一笔 prefill 的全部位置，或一轮 decode 的 1 个位置），
 // 返回**每一行各自的 logits**（行序与入参 tokens 一致）。
 //
-// 语义对齐设计 §2.5.5：batch 内第 i 行的绝对位置是 `Positions()+i`；
+// 语义对齐设计：batch 内第 i 行的绝对位置是 `Positions()+i`；
 // prefill 时先多行写 KV 再多行读 KV，decode 时每次各写 1 行。
 //
-// 每个 block 的执行次序严格按 T01 的 plan（route2plan.StepsPerBlock=8）展开：
+// 每个 block 的执行次序严格按 plan（route2plan.StepsPerBlock=8）展开：
 //
 //	attn_norm → 投影 Q/K/V → RoPE(Q,K) → KV 追加 → attention → Wo → 残差 →
 //	ffn_norm → Wup → GELU → Wdown → 残差
@@ -276,7 +276,7 @@ func (r *Runner) Step(tokens []int) ([][]float64, error) {
 		if err != nil {
 			return nil, err
 		}
-		// RoPE 只作用于 Q/K（V 不旋转，D8），且**在 KV 追加之前**完成。
+		// RoPE 只作用于 Q/K（V 不旋转），且**在 KV 追加之前**完成。
 		for i := range q {
 			if err := trustedops.ApplyRoPEInPlace(q[i], base+i, headDim, theta); err != nil {
 				return nil, err
@@ -363,10 +363,10 @@ func Forward(w Weights, cfg route2plan.ModelConfig, tokens []int) ([][]float64, 
 	return r.Step(tokens)
 }
 
-// ForwardExact `ref-exact` 基线：去量化 int8 权重的纯 fp64 前向（设计 §8.1）。
+// ForwardExact `ref-exact` 基线：去量化 int8 权重的纯 fp64 前向。
 //
 // 这条基线消掉了量化误差，因此「生产管线 vs ForwardExact」的偏差只可能来自
-// 定点截断与掩码管线自身错误——这正是 §8.1 档 A（rtol=1e-3）想要隔离的东西。
+// 定点截断与掩码管线自身错误——这正是档 A（rtol=1e-3）想要隔离的东西。
 func ForwardExact(cfg route2plan.ModelConfig, tokens []int) ([][]float64, error) {
 	w, err := NewExactWeights(cfg)
 	if err != nil {
@@ -375,9 +375,9 @@ func ForwardExact(cfg route2plan.ModelConfig, tokens []int) ([][]float64, error)
 	return Forward(w, cfg, tokens)
 }
 
-// ForwardFP32 `ref-fp32` 基线：未量化原始权重的纯 fp64 前向（设计 §8.1）。
+// ForwardFP32 `ref-fp32` 基线：未量化原始权重的纯 fp64 前向。
 //
-// 这条基线含全部量化损失，代表"真实模型语义"，是 §8.1 档 B（rtol=5e-2）
+// 这条基线含全部量化损失，代表"真实模型语义"，是档 B（rtol=5e-2）
 // 与生成序列 top-1 命中率门禁的参照对象。
 func ForwardFP32(cfg route2plan.ModelConfig, tokens []int) ([][]float64, error) {
 	w, err := NewFP32Weights(cfg)
@@ -393,7 +393,7 @@ func ForwardFP32(cfg route2plan.ModelConfig, tokens []int) ([][]float64, error) 
 //   - logits：每步生成的 logits（行序 == 生成序，含 prefill 末位那一步）；
 //   - generated：解码出来的 token 序列（长度 == steps）。
 //
-// next token 由 trustedops.ArgMax 决定（方案 C：TEE 内 argmax），与服务端判据一致。
+// next token 由 trustedops.ArgMax 决定（TEE 内 argmax），与服务端判据一致。
 func Generate(w Weights, cfg route2plan.ModelConfig, prompt []int, steps int) (logits [][]float64, generated []int, err error) {
 	if steps < 0 {
 		return nil, nil, fmt.Errorf("route2ref: steps=%d 不可为负", steps)
@@ -450,9 +450,9 @@ func Embedding(cfg route2plan.ModelConfig, tokens []int) ([][]float64, error) {
 	return rows, nil
 }
 
-// ---------- 双基线对比（供 T05 与 --selftest 复用） ----------
+// ---------- 双基线对比（供阶段 5 与 --selftest 复用） ----------
 
-// Report 一次双基线对比的结果（设计 §8.1 的混合容差口径）。
+// Report 一次双基线对比的结果（混合容差口径）。
 type Report struct {
 	// Atol / Rtol 本次比较使用的混合容差参数（|x-y| <= Atol + Rtol*|y|）。
 	Atol float64
@@ -471,12 +471,12 @@ type Report struct {
 	Top1AgreeAll bool
 }
 
-// Compare 两条基线 logits 的混合容差对比（设计 §8.1）：
+// Compare 两条基线 logits 的混合容差对比：
 //
 //	|x-y| <= atol + rtol*|y|
 //
 // 同时附带 top-1 命中统计。任一 logits 形状不一致或含 NaN/Inf 一律 error
-// （§8.1 的附加崩坏门禁：出现 NaN/Inf 即判失败，不分档）。
+// （附加崩坏门禁：出现 NaN/Inf 即判失败，不分档）。
 func Compare(a, b [][]float64, atol, rtol float64) (Report, error) {
 	rep := Report{Atol: atol, Rtol: rtol, Steps: len(a)}
 	if len(a) != len(b) {
@@ -517,25 +517,25 @@ func Compare(a, b [][]float64, atol, rtol float64) (Report, error) {
 	return rep, nil
 }
 
-// GradeAAtol 设计 §8.1 档 A 的绝对项系数：`atol = 1e-6 · max|logits|`。
+// GradeAAtol 档 A 的绝对项系数：`atol = 1e-6 · max|logits|`。
 const GradeAAtol = 1e-6
 
-// GradeARtol 设计 §8.1 档 A 的相对项：`rtol = 1e-3`。
+// GradeARtol 档 A 的相对项：`rtol = 1e-3`。
 const GradeARtol = 1e-3
 
-// GradeBRtol 设计 §8.1 档 B 的相对项：`rtol = 5e-2`。
+// GradeBRtol 档 B 的相对项：`rtol = 5e-2`。
 const GradeBRtol = 5e-2
 
-// Selftest 供 `cmd/route2-client --selftest` 直接调用的入口（T04 会用）。
+// Selftest 供 `cmd/route2-client --selftest` 直接调用的入口（阶段 4 会用）。
 //
 // 它做三件事：
 //  1. 跑 ref-exact 与 ref-fp32 两条基线（同一份 tokens，同一份算子）；
-//  2. 用 §8.1 档 A 的 atol/rtol 口径报告两条基线之间的偏差；
+//  2. 用档 A 的 atol/rtol 口径报告两条基线之间的偏差；
 //  3. 触发附加崩坏门禁检查（NaN/Inf）。
 //
 // 注意：`MaxRelDiff` 是**两条基线之间的量化噪声观测值**，不等于最终 G2 的
-// 「生产管线 vs ref-exact」门禁值；后者要等 T03/T04 接好后才有意义。
-// 在 team-lead 重新审定之前，请勿用本返回值替代任何一档的判定。
+// 「生产管线 vs ref-exact」门禁值；后者要等阶段 3/4 接好后才有意义。
+// 请勿用本返回值替代任何一档的判定。
 func Selftest(cfg route2plan.ModelConfig, tokens []int) (Report, error) {
 	exact, err := ForwardExact(cfg, tokens)
 	if err != nil {
