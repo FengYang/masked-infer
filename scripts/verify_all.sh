@@ -54,7 +54,11 @@ field() {
 
 # assert_run <log> <label> [必须实跑的测试函数名...]
 # 防 `go test -run` 无匹配却 exit 0 的恒假 PASS；「有 === RUN」才证明测试真跑过。
-# 若输出含 --- SKIP，只告警不改判：SKIP 按 §5.1 仍属「未取证」，不得据此宣称 PASS。
+#
+# 三条判据都只看**日志内容**，不看管道 rc —— 因为 `go test ... | tee` 的 rc 语义依赖
+# pipefail：本脚本 `set -euo pipefail` 时 rc 能穿透（实测失败用例 rc=1），但只要有人
+# 在某个子 shell 里 `set +o pipefail`、或把这段片段抄到别处，rc 就变成 tee 的 0（实测
+# 同一失败用例 rc=0）。所以「有没有失败」必须自己从输出里读，不能指望 rc。
 assert_run() {
   local log="$1" label="$2"
   shift 2
@@ -69,7 +73,15 @@ assert_run() {
     grep -qE "^=== RUN[[:space:]]+${name}$" "$log" \
       || die "${label} 缺少实跑测试 ${name}（禁止假 PASS）"
   done
-  if grep -q '^--- SKIP' "$log"; then
+  # 硬判 --- FAIL（防御纵深）。缩进容忍是必须的：子测试失败输出为
+  # `    --- FAIL: TestX/sub`（4 空格），只认行首会漏。
+  # 一律 `grep -qE <pat> <file>` 直接读文件，绝不写成 `cmd | grep -q`
+  # （命中即关读端 → 上游 SIGPIPE(141) → pipefail 下把正常通过误判红）。
+  if grep -qE '^[[:space:]]*--- FAIL' "$log"; then
+    die "${label} 输出含 --- FAIL（go test 失败但管道 rc 可能被 tee 吞成 0）：禁止判过"
+  fi
+  # SKIP 只告警不改判（宽松版语义）；同样缩进容忍，子测试 Skip 输出为 `    --- SKIP: TestX/sub`。
+  if grep -qE '^[[:space:]]*--- SKIP' "$log"; then
     warn "${label} 存在 SKIP 用例：按 §5.1 判未取证，不得据此宣称 PASS"
   fi
 }
@@ -88,9 +100,13 @@ assert_run() {
 assert_run_strict() {
   local log="$1" label="$2"
   assert_run "$@"
-  if grep -q '^--- SKIP' "$log"; then
+  # 缩进容忍：`go test -v` 对**子测试**输出 `    --- SKIP: TestX/sub`（4 空格）。
+  # 只认行首 `^--- SKIP` 会放过「顶层 PASS、子测试 Skip」这种形态 —— 那是 SKIP 冒充
+  # 取证的第二个入口（F-B 上一轮只堵了行首那个）。实测：真实子测试 Skip 样本里
+  # `^--- SKIP` 命中 0 次、`^[[:space:]]*--- SKIP` 命中 1 次。
+  if grep -qE '^[[:space:]]*--- SKIP' "$log"; then
     local skips
-    skips="$(grep -c '^--- SKIP' "$log" || true)"
+    skips="$(grep -cE '^[[:space:]]*--- SKIP' "$log" || true)"
     skips="${skips:-0}"
     REMOTE_SKIPS=$((REMOTE_SKIPS + skips))
     die "${label} 存在 ${skips} 条 --- SKIP 用例：按 §5.1 判未取证，不得宣称 PASS（段末判绿标记已被阻止）"
@@ -340,14 +356,15 @@ DUMMYGO
   [ "$rc" -ne 0 ] || die "-run 无匹配样本未被守卫判红（假绿通道未堵住）"
   pass "=== RUN 守卫双向验证（真实 go test -v：有匹配 ${pos_run_count} 条 RUN 不误判红 / 无匹配 ${neg_run_count} 条 RUN 必判红；tee 落文件后 grep，无 SIGPIPE 假红）"
 
-  # (k3) assert_run_strict 双向自检（F-B 回归护栏，CI 可跑、不需要真机）
+  # (k3) 断言层双向自检（F-B 回归护栏，CI 可跑、不需要真机）
   #   为什么要有这条：(k)/(k2) 只证明「有没有实跑」，不证明「SKIP 会不会被洗成 PASS」。
   #   门控 3 的测试在权重缺失时主动 t.Skip，若只有宽松断言，=== RUN 存在就能一路判绿、
-  #   段末照打判绿标记 —— 这正是 F-B 的假 PASS 通道。此处用真 go test -v 的 Skip 样本
-  #   把 strict 的「差量」测出来：
-  #     样本 A（--- SKIP）：宽松 assert_run 必须判过（对照，证明差量确实来自 strict）、
-  #                        assert_run_strict 必须判红；
-  #     样本 B（纯 PASS） ：assert_run_strict 必须不误判红。
+  #   段末照打判绿标记 —— 这正是 F-B 的假 PASS 通道。
+  #   两个样本，均用**真实 go test -v** 产出（不用手写日志，避免样本与 Go 实际输出漂移）：
+  #     样本 A（顶层 --- SKIP）：宽松 assert_run 必须判过（对照，证明差量来自 strict）、
+  #                              assert_run_strict 必须判红；
+  #     样本 B（纯 PASS）      ：assert_run_strict 必须不误判红。
+  #   （缩进的子测试 SKIP 与 --- FAIL 两个样本见下方的 (k4)，独立成条以便审计。）
   cat > "$guard_pkg/dummy_skip_test.go" <<'DUMMYSKIPGO'
 package dummy
 
@@ -363,7 +380,7 @@ DUMMYSKIPGO
     || die "SKIP 哑测试 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_skip.log")"
   grep -q '^=== RUN[[:space:]]\+TestGuardSkip$' "$TMP_DIR/guard_skip.log" \
     || die "SKIP 哑测试未产生 === RUN（样本无效）"
-  grep -q '^--- SKIP' "$TMP_DIR/guard_skip.log" \
+  grep -qE '^--- SKIP' "$TMP_DIR/guard_skip.log" \
     || die "SKIP 哑测试未产生 --- SKIP 行（样本无效，无法验证 strict）"
   rc=0
   ( assert_run "$TMP_DIR/guard_skip.log" "GUARD-SKIP-LOOSE" TestGuardSkip ) >/dev/null 2>&1 || rc=$?
@@ -375,7 +392,65 @@ DUMMYSKIPGO
   rc=0
   ( assert_run_strict "$TMP_DIR/guard_pos.log" "GUARD-PASS-STRICT" TestGuardReal ) >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || die "assert_run_strict 在纯 PASS 样本上误判红"
-  pass "assert_run_strict 双向验证（同一 Skip 样本：宽松断言判过、strict 判红 → 差量可归因；纯 PASS 样本 strict 不误判红）"
+  pass "assert_run_strict 双向验证（A 顶层 SKIP：宽松断言判过 / strict 判红 → 差量可归因；B 纯 PASS 样本 strict 不误判红）"
+
+  # (k4) 缩进逃逸与 FAIL 硬判自检（D-1 回归护栏）
+  #   与 (k3) 分开成独立断言，是为了让「这两条覆盖存在」在静态段输出里独占一行可审计，
+  #   而不是被合并进 (k3) 的括号里（合并后条数不变，人就看不出来多了两项）。
+  #   样本 C（子测试 Skip，缩进 `    --- SKIP: TestGuardSub/sub`）：
+  #     旧正则 `^--- SKIP` 对它命中 0 次 ⇒ strict 会放行 ⇒ SKIP 冒充取证的第二入口。
+  #   样本 D（--- FAIL）：assert_run 必须自己从输出判红，不依赖管道 rc
+  #     （关掉 pipefail 时同一样本管道 rc=0，实测）。
+  cat > "$guard_pkg/dummy_sub_test.go" <<'DUMMYSUBGO'
+package dummy
+
+import "testing"
+
+// TestGuardSub 模拟「顶层 PASS、子测试 Skip」的形态（门控按其用例分组时会出现）。
+func TestGuardSub(t *testing.T) {
+	t.Run("sub", func(t *testing.T) {
+		t.Skip("guard sub-skip sample: 模拟子测试因前置条件缺失而 Skip")
+	})
+}
+DUMMYSUBGO
+  ( cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardSub$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_sub.log" ) >/dev/null \
+    || die "子测试 Skip 样本 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_sub.log")"
+  # 样本有效性自证（这是本样本的全部价值）：行首正则命中 0、缩进正则命中 >=1，
+  # 即「旧正则必然漏掉这个样本」这件事本身被机器证明了。
+  sub_line_start_hits="$(grep -cE '^--- SKIP' "$TMP_DIR/guard_sub.log" || true)"
+  sub_indented_hits="$(grep -cE '^[[:space:]]*--- SKIP' "$TMP_DIR/guard_sub.log" || true)"
+  sub_line_start_hits="${sub_line_start_hits:-0}"
+  sub_indented_hits="${sub_indented_hits:-0}"
+  [ "$sub_line_start_hits" -eq 0 ] \
+    || die "子测试 Skip 样本未体现缩进逃逸（行首命中 ${sub_line_start_hits} 次），样本无效"
+  [ "$sub_indented_hits" -ge 1 ] \
+    || die "子测试 Skip 样本未产生缩进 --- SKIP 行（缩进命中 ${sub_indented_hits} 次），样本无效"
+  rc=0
+  ( assert_run_strict "$TMP_DIR/guard_sub.log" "GUARD-SUBSKIP-STRICT" TestGuardSub ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || die "assert_run_strict 未拦住缩进的子测试 --- SKIP（D-1 缩进逃逸未修好）"
+
+  cat > "$guard_pkg/dummy_fail_test.go" <<'DUMMYFAILGO'
+package dummy
+
+import "testing"
+
+// TestGuardFail 模拟「测试真的失败」的形态。
+func TestGuardFail(t *testing.T) {
+	t.Fatal("guard fail sample: 模拟测试失败")
+}
+DUMMYFAILGO
+  # 先证明「rc 不可依赖」这个前提成立：关掉 pipefail 后，同一条失败管道 rc=0（tee 的 rc）。
+  fail_pipe_rc_nopipefail=0
+  ( set +o pipefail
+    cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardFail$' -count=1 -v 2>&1 \
+      | tee "$TMP_DIR/guard_fail.log" >/dev/null ) || fail_pipe_rc_nopipefail=$?
+  grep -qE '^[[:space:]]*--- FAIL' "$TMP_DIR/guard_fail.log" \
+    || die "FAIL 样本未产生 --- FAIL 行（样本无效）"
+  rc=0
+  ( assert_run "$TMP_DIR/guard_fail.log" "GUARD-FAIL" TestGuardFail ) >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || die "assert_run 未拦住 --- FAIL（管道 rc 被吞时会假绿）"
+  pass "缩进逃逸与 FAIL 硬判自检（C 子测试缩进 SKIP 已判红：行首命中 ${sub_line_start_hits} 次 / 缩进命中 ${sub_indented_hits} 次；D --- FAIL 已判红：关 pipefail 后管道 rc=${fail_pipe_rc_nopipefail} 已被吞仍判红）"
 
   # (l) 仓库可 clone 留证（只读，临时目录，不污染仓库）
   if [ -d .git ]; then
@@ -498,7 +573,7 @@ run_remote() {
   local_gate_skips=0
   for gate_log in "$TMP_DIR"/gate*.log; do
     [ -f "$gate_log" ] || continue
-    n="$(grep -c '^--- SKIP' "$gate_log" || true)"
+    n="$(grep -cE '^[[:space:]]*--- SKIP' "$gate_log" || true)"
     n="${n:-0}"
     if [ "$n" -gt 0 ]; then
       echo "  [SKIP-DETECTED] $(basename "$gate_log")：${n} 条 --- SKIP" >&2
