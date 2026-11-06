@@ -36,7 +36,21 @@ TMP_DIR="$(mktemp -d)"
 if command -v cygpath >/dev/null 2>&1; then
   TMP_DIR="$(cygpath -u "$TMP_DIR")"
 fi
-trap 'rm -rf "$TMP_DIR"' EXIT
+
+# BUILD_DIR：Go **编译产物**（cic 可执行文件、go test 的临时测试二进制）一律不放系统 Temp。
+#
+# 为什么（本机实测，不是猜测）：360 杀毒按启发式拦截 Temp 下新生成的 exe，报
+# Win64/Heur.Generic.H8oAN9EA，表现为执行时 `Permission denied`(rc=126) 或被直接删除。
+# 后果是静态段**非确定**：同一份代码有时全绿、有时在 (e)/(e2)/(k2)/(k3)/(k4) 随机失败点
+# 判红。门禁不稳定比门禁漏判更危险 —— 下一个人会以「它本来就不稳定」为由把它改松。
+# 日志（.log/.json）仍留在 TMP_DIR：纯文本不触发启发式。
+BUILD_DIR="${REPO_ROOT}/.verify-tmp"
+mkdir -p "$BUILD_DIR"
+
+_vcleanup() { rm -rf "$TMP_DIR" "$BUILD_DIR"; }
+trap '_vcleanup' EXIT
+# INT/TERM 必须显式 exit：trap 处理函数只删目录然后返回的话，脚本会继续往下执行。
+trap '_vcleanup; exit 130' INT TERM
 
 # 静态段统一加 [STATIC-PASS] 前缀，避免与真机门控判绿混淆（B4）。
 pass() { printf '  [STATIC-PASS] %s\n' "$1"; }
@@ -119,6 +133,11 @@ assert_run_strict() {
 run_static() {
   echo "== 本地静态段（[STATIC-PASS] 均为本地项，非真机门控结论） =="
 
+  # go test 会把临时测试二进制写进 GOTMPDIR（默认落在系统 Temp）；一并挪到 BUILD_DIR，
+  # 避免同一处杀软启发式误伤。见文件头部 BUILD_DIR 的说明。
+  export GOTMPDIR="$BUILD_DIR/gotmp"
+  mkdir -p "$GOTMPDIR"
+
   # (a) gofmt -l 零输出
   mapfile -t go_files < <(find . -name '*.go' -not -path './.git/*' -type f | sort)
   if [ "${#go_files[@]}" -eq 0 ]; then
@@ -200,9 +219,9 @@ FAKEGO
   #   scripts/closure-baseline.json 并提交，两侧同批评审。
   if [ -d "$MAIN_REPO" ]; then
     # WARN-10：先 go build 到临时可执行文件再执行，去掉对 `go run` 临时目录执行权限的依赖。
-    GO111MODULE=off go build -o "$TMP_DIR/cic" scripts/check_import_closure.go \
+    GO111MODULE=off go build -o "$BUILD_DIR/cic" scripts/check_import_closure.go \
       || die "check_import_closure.go 构建失败"
-    "$TMP_DIR/cic" \
+    "$BUILD_DIR/cic" \
       -root "$MAIN_REPO" -mode baseline -out "$TMP_DIR/closure-recheck.json" \
       > "$TMP_DIR/closure-recheck.log" 2>&1 || die "闭包扫描失败: $(cat "$TMP_DIR/closure-recheck.log")"
     for key in parse_failures forbidden_path_hits new_repo_cross_hits; do
@@ -228,9 +247,9 @@ FAKEGO
   # (e2) 新库零主仓依赖核验（verify 模式常驻门禁；go1.20 可跑）
   #   产品代码不得出现主仓/gmsm import 前缀；唯一白名单 scripts/verify_golden_against_main.go
   #   由工具在 verify 模式显式跳过（真机复核工具须 import 主仓 cipher/mask）。S2/S3 主仓语义 SKIP。
-  GO111MODULE=off go build -o "$TMP_DIR/cic" scripts/check_import_closure.go \
+  GO111MODULE=off go build -o "$BUILD_DIR/cic" scripts/check_import_closure.go \
     || die "check_import_closure.go 构建失败"
-  if "$TMP_DIR/cic" -root "$REPO_ROOT" -mode verify \
+  if "$BUILD_DIR/cic" -root "$REPO_ROOT" -mode verify \
       -forbid-prefix 'security-ai-gateway/' \
       -forbid-prefix 'github.com/FengYang/security-ai-gateway/' \
       -forbid-prefix 'github.com/emmansun/gmsm' \
@@ -385,7 +404,7 @@ DUMMYSKIPGO
       | tee "$TMP_DIR/guard_skip.log" ) >/dev/null \
     || die "SKIP 哑测试 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_skip.log")"
   grep -q '^=== RUN[[:space:]]\+TestGuardSkip$' "$TMP_DIR/guard_skip.log" \
-    || die "SKIP 哑测试未产生 === RUN（样本无效）"
+    || die "SKIP 哑测试未产出 === RUN（go test 很可能被杀软/权限拦在临时编译产物上，属环境问题，非判据失效；先查杀软白名单与 .verify-tmp 可执行权限）：$(tail -n 3 "$TMP_DIR/guard_skip.log")"
   grep -qE '^--- SKIP' "$TMP_DIR/guard_skip.log" \
     || die "SKIP 哑测试未产生 --- SKIP 行（样本无效，无法验证 strict）"
   rc=0
@@ -422,6 +441,14 @@ DUMMYSUBGO
   ( cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardSub$' -count=1 -v 2>&1 \
       | tee "$TMP_DIR/guard_sub.log" ) >/dev/null \
     || die "子测试 Skip 样本 go test 执行失败: $(tail -n 3 "$TMP_DIR/guard_sub.log")"
+  # 前置断言（必须在判据断言之前）：区分「环境/工具链坏了」与「判据失效」。
+  # 若 go test 因杀软拦截、权限拒绝、编译失败而根本没跑起来，日志里不会有任何 === RUN。
+  # 这时若直接报「样本无效」，会把人引去改样本/改正则 —— 那正是「为了让门禁闭嘴而改
+  # 期望值」的入口。所以先单独判「有没有实跑」，文案明确指向环境。
+  sub_run_count="$(grep -c '^=== RUN' "$TMP_DIR/guard_sub.log" || true)"
+  sub_run_count="${sub_run_count:-0}"
+  [ "$sub_run_count" -ge 1 ] \
+    || die "子测试 Skip 样本未产出任何 === RUN（go test 很可能被杀软拦截了临时编译产物，属环境问题，非判据失效）：$(tail -n 3 "$TMP_DIR/guard_sub.log")"
   # 样本有效性自证（这是本样本的全部价值）：行首正则命中 0、缩进正则命中 >=1，
   # 即「旧正则必然漏掉这个样本」这件事本身被机器证明了。
   sub_line_start_hits="$(grep -cE '^--- SKIP' "$TMP_DIR/guard_sub.log" || true)"
@@ -431,7 +458,7 @@ DUMMYSUBGO
   [ "$sub_line_start_hits" -eq 0 ] \
     || die "子测试 Skip 样本未体现缩进逃逸（行首命中 ${sub_line_start_hits} 次），样本无效"
   [ "$sub_indented_hits" -ge 1 ] \
-    || die "子测试 Skip 样本未产生缩进 --- SKIP 行（缩进命中 ${sub_indented_hits} 次），样本无效"
+    || die "子测试 Skip 样本有 === RUN 但无缩进 --- SKIP 行（缩进命中 ${sub_indented_hits} 次）：Go 的 -v 输出格式可能变了，须复核正则，非环境问题：$(tail -n 3 "$TMP_DIR/guard_sub.log")"
   rc=0
   ( assert_run_strict "$TMP_DIR/guard_sub.log" "GUARD-SUBSKIP-STRICT" TestGuardSub ) >/dev/null 2>&1 || rc=$?
   [ "$rc" -ne 0 ] || die "assert_run_strict 未拦住缩进的子测试 --- SKIP（D-1 缩进逃逸未修好）"
@@ -451,8 +478,13 @@ DUMMYFAILGO
   ( set +o pipefail
     cd "$guard_pkg" && GO111MODULE=off go test -run '^TestGuardFail$' -count=1 -v 2>&1 \
       | tee "$TMP_DIR/guard_fail.log" >/dev/null ) || fail_pipe_rc_nopipefail=$?
+  # 前置断言：与样本 C 同理，先分「没跑起来（环境）」和「跑了但没有 FAIL 行（格式变了）」。
+  fail_run_count="$(grep -c '^=== RUN' "$TMP_DIR/guard_fail.log" || true)"
+  fail_run_count="${fail_run_count:-0}"
+  [ "$fail_run_count" -ge 1 ] \
+    || die "FAIL 样本未产出任何 === RUN（go test 很可能被杀软拦截了临时编译产物，属环境问题，非判据失效）：$(tail -n 3 "$TMP_DIR/guard_fail.log")"
   grep -qE '^[[:space:]]*--- FAIL' "$TMP_DIR/guard_fail.log" \
-    || die "FAIL 样本未产生 --- FAIL 行（样本无效）"
+    || die "FAIL 样本有 === RUN 但无 --- FAIL 行：Go 的 -v 输出格式可能变了，须复核，非环境问题：$(tail -n 3 "$TMP_DIR/guard_fail.log")"
   rc=0
   ( assert_run "$TMP_DIR/guard_fail.log" "GUARD-FAIL" TestGuardFail ) >/dev/null 2>&1 || rc=$?
   [ "$rc" -ne 0 ] || die "assert_run 未拦住 --- FAIL（管道 rc 被吞时会假绿）"
