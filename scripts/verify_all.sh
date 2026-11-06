@@ -37,14 +37,28 @@ if command -v cygpath >/dev/null 2>&1; then
   TMP_DIR="$(cygpath -u "$TMP_DIR")"
 fi
 
-# BUILD_DIR：Go **编译产物**（cic 可执行文件、go test 的临时测试二进制）一律不放系统 Temp。
+# BUILD_DIR：Go **编译产物**（cic 可执行文件、go test 的临时测试二进制）的落地目录。
 #
-# 为什么（本机实测，不是猜测）：360 杀毒按启发式拦截 Temp 下新生成的 exe，报
-# Win64/Heur.Generic.H8oAN9EA，表现为执行时 `Permission denied`(rc=126) 或被直接删除。
-# 后果是静态段**非确定**：同一份代码有时全绿、有时在 (e)/(e2)/(k2)/(k3)/(k4) 随机失败点
-# 判红。门禁不稳定比门禁漏判更危险 —— 下一个人会以「它本来就不稳定」为由把它改松。
-# 日志（.log/.json）仍留在 TMP_DIR：纯文本不触发启发式。
-BUILD_DIR="${REPO_ROOT}/.verify-tmp"
+# 两条硬约束（都是本机实测撞出来的，不是预防性设计）：
+#  1) 不能放系统 Temp：360 杀毒按启发式拦截 Temp 下新生成的 exe，报
+#     Win64/Heur.Generic.H8oAN9EA，表现为执行时 `Permission denied`(rc=126) 或被删除
+#     ⇒ 静态段非确定（同一份代码随机失败在 (e)/(e2)/(k2)/(k3)/(k4)）。
+#  2) **不能放仓库内**：仓库级检查用 find 枚举 .go；GOTMPDIR 会让 Go 把自动生成的
+#     `_testmain.go` 写进去，一次异常中断（进程组被 SIGKILL，trap 不保证执行）就残留，
+#     下一次运行立刻红在 `gofmt -l: ./.verify-tmp/gotmp/.../_testmain.go` 上（实测）。
+#     所以「trap 清理」不能作为唯一保证，必须从**位置**上隔离。
+# 默认落在仓库的**同级目录**（与仓库同盘但不在工作树内），可用 MASKED_INFER_BUILD_DIR 覆写
+# （CI / 只读挂载时改道）。日志（.log/.json）仍留在 TMP_DIR：纯文本不触发启发式。
+BUILD_DIR="${MASKED_INFER_BUILD_DIR:-$(cd "$REPO_ROOT/.." && pwd)/.masked-infer-verify}"
+# 相对路径先绝对化，否则下面的「是否落在仓库内」前缀守卫会漏判。
+case "$BUILD_DIR" in
+  /* | [A-Za-z]:[/\\]*) : ;;
+  *) BUILD_DIR="$PWD/$BUILD_DIR" ;;
+esac
+# 守卫：真的落在仓库内就退回 TMP_DIR/build（宁可回到会被杀软拦的 Temp，也不能毒化仓库扫描）
+case "$BUILD_DIR" in
+  "$REPO_ROOT" | "$REPO_ROOT"/*) BUILD_DIR="$TMP_DIR/build" ;;
+esac
 mkdir -p "$BUILD_DIR"
 
 _vcleanup() { rm -rf "$TMP_DIR" "$BUILD_DIR"; }
@@ -139,7 +153,17 @@ run_static() {
   mkdir -p "$GOTMPDIR"
 
   # (a) gofmt -l 零输出
-  mapfile -t go_files < <(find . -name '*.go' -not -path './.git/*' -type f | sort)
+  # 枚举用 **git 跟踪清单**而不是 `find` 文件系统枚举：
+  #   find 会把任何往仓库里落地的生成物（如 Go 自动生成的 _testmain.go）算进来，
+  #   一次异常中断的残留就能让它红在一个与源码无关的路径上（实测过）。
+  #   `git ls-files` 只认已跟踪文件，判据不会被工作树里的临时物污染。
+  # 非 git 工作树（如 CI 里从 tarball 展开的副本）退回 find，并显式排除构建产物目录。
+  if [ -d .git ]; then
+    mapfile -t go_files < <(git ls-files '*.go' | sort)
+  else
+    mapfile -t go_files < <(find . -name '*.go' -not -path './.git/*' -type f \
+      -not -path './.masked-infer-verify/*' | sort)
+  fi
   if [ "${#go_files[@]}" -eq 0 ]; then
     die "未找到 .go 文件"
   fi

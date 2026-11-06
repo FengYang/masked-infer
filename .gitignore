@@ -15,10 +15,6 @@ go.work.sum
 /dist/
 /build/
 
-# verify_all.sh 的编译产物目录（Go 可执行文件不放系统 Temp：本机杀软会按启发式拦截，
-# 导致门禁随机失败。trap 在退出时清理，此处忽略仅为防异常残留把工作树弄脏）。
-.verify-tmp/
-
 # 临时依赖清单（G1 门禁输出与逻辑自检样本）
 deps.txt
 g1_deps.txt
