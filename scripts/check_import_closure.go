@@ -542,9 +542,18 @@ func main() {
 	}
 	fmt.Printf("BASELINE_SUMMARY go_files=%d test_files=%d import_lines=%d group_hits=%d\n",
 		report.TotalGoFiles, report.TotalTestGoFiles, report.TotalImportLines, report.TotalGroupHits)
-	// 供 scripts/verify_all.sh 的 S3 守卫做数值比对（取表长度，不另写常量）：
-	// Go 侧白名单表与 shell 侧硬编码 8 必须同批修改，任一侧漂移都会被门禁挡住。
+	// 供 scripts/verify_all.sh 的 S3 守卫做数值/键值比对（均取自表本身，不另写常量）：
+	// Go 侧白名单表与 shell 侧硬编码常量必须同批修改，任一侧漂移都会被门禁挡住。
 	fmt.Printf("LEGAL_IMPORT_PATHS_N=%d\n", len(legalImportPaths))
+	// 规范键串：map 键排序后逗号连接（R-02）。只守条目数时，「保持 8 项但把某键
+	// 换成 evil/pkg」会静默扩大消费面：N 仍为 8、两个 internal 负例仍全绿。
+	// shell 侧必须再对键串整体做**等值比较**，才能堵住这个换键通道。
+	legalKeys := make([]string, 0, len(legalImportPaths))
+	for key := range legalImportPaths {
+		legalKeys = append(legalKeys, key)
+	}
+	sort.Strings(legalKeys)
+	fmt.Printf("LEGAL_IMPORT_PATHS_KEYS=%s\n", strings.Join(legalKeys, ","))
 	for _, key := range report.GroupKeys {
 		fmt.Printf("  group %-38s import_hits=%d importer_files=%d own_files=%d\n",
 			key, report.GroupHitCounts[key], report.GroupFileCounts[key], report.GroupOwnCounts[key])

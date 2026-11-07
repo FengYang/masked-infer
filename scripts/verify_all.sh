@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # verify_all.sh —— 阶段 0 一键复验（本地静态段 + 🖥 真机段）。
 #
-# ⚠ 真机 192.168.31.248 SSH 当前不可用，真机段未取证；
+# ⚠ 本脚本未执行 `-remote` 段；门控 1–5 独立取证见
+#   F:/方案/_xfer/remote_logs/gate15.log 与方案 §8.4。
 #   **禁止把静态段 [STATIC-PASS] 冒充门控 1–5 PASS**。
-#   本机仅 go1.20.3，无法编译 go 1.26.0 模块；编译/真机类验收一律标
-#   「🖥 待环境就绪（未取证）」。
+#   本机仅 go1.20.3，无法编译 go 1.26.0 模块；编译/真机类验收以真机日志为准，
+#   本脚本不对门控 1–5 下结论。
 #   -remote 仅阶段 1+ 且 Go 1.26 真机 / go.work workspace 就绪后使用
 #   （阶段 0 空模块无包可测，不满足该段前置条件）。
 #
@@ -79,6 +80,26 @@ die() {
 
 field() {
   grep -m1 "\"$1\"" "$2" 2>/dev/null | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true
+}
+
+# LEGAL_KEYS_EXPECTED：S3 白名单规范键串（与 check_import_closure.go 的 legalImportPaths
+# 表**同一份契约**）。Go 表增删/换键时本常量必须同批修改，否则 (e) 守卫判红。
+# 排序口径：字典序逗号连接，与 Go 侧 sort.Strings 一致。
+LEGAL_KEYS_EXPECTED='adapters/qwen,backend,core,core/trustedops,demo,masklite,plan,ref'
+
+# assert_s3_allowlist <log>：S3 白名单三重守卫。返回码
+#   0=通过 / 1=S3 未 PASS / 2=LEGAL_IMPORT_PATHS_N≠8 / 3=键串不符。
+# 三重分开是为了 (e3) 负例 3 能证明「只守 N=8 时换键仍会放行」。
+# N 的模式带 $ 行尾锚（R-03）：无锚时 `=8garbage` 会被截成 8 放行；
+# 取值后**等值比较**，禁止 `grep -E '^...=8'` 前缀命中即过。
+assert_s3_allowlist() {
+  local log="$1" n keys
+  grep -q '^S3 PASS' "$log" || return 1
+  n="$(sed -n 's/^LEGAL_IMPORT_PATHS_N=\([0-9][0-9]*\)$/\1/p' "$log" | head -n 1)"
+  [ "$n" = "8" ] || return 2
+  keys="$(sed -n 's/^LEGAL_IMPORT_PATHS_KEYS=\(.*\)$/\1/p' "$log" | head -n 1)"
+  [ "$keys" = "$LEGAL_KEYS_EXPECTED" ] || return 3
+  return 0
 }
 
 # assert_run <log> <label> [必须实跑的测试函数名...]
@@ -248,7 +269,8 @@ FAKEGO
   # (e) check_import_closure.go 主仓消费面复核（纯标准库，go1.20 可跑）
   #   默认弱校验：只断言两项真门禁为空（parse_failures / forbidden_path_hits）；
   #   S3 由 Go 侧「新库公开包 8 项精确等值白名单（越界=0）」判定，shell 侧再核
-  #   S3 PASS 与白名单表长度 LEGAL_IMPORT_PATHS_N=8（见下方守卫）。
+  #   S3 PASS 与白名单表长度 LEGAL_IMPORT_PATHS_N=8 + 键串 LEGAL_KEYS_EXPECTED
+  #   三重守卫（见 assert_s3_allowlist）。
   #   4 项计数仅 INFO 打印、不判红：阶段 4 网关已按 CA-5 合法消费新库，主仓删包后
   #   计数（1030/514/5743/35）相对冻结基线（1072/536/5875/93）漂移属预期。
   #   scripts/closure-baseline.json 是**冻结的历史快照**：重算基线等于把阶段 4 漂移
@@ -266,16 +288,13 @@ FAKEGO
       grep -q "\"${key}\": \[\]" "$TMP_DIR/closure-recheck.json" \
         || die "闭包真门禁 ${key} 非空（详见 $TMP_DIR/closure-recheck.json）"
     done
-    # S3 守卫：Go 侧白名单判据必须判 PASS，且白名单表长度恒为 8。
-    # 数值比较（取值后比较）而非 `grep -E '^...=8'` 前缀命中即过：后者没有尾锚，
-    # `=80` 也以 `=8` 开头，白名单被扩到 80 项照样放行；取不到（空串）同样判红，
-    # 否则工具一旦停止打印该行，守卫就静默失效。Go 侧 legalImportPaths 表长度与
-    # shell 硬编码 8 是同一份契约的两处表达，**必须同批修改**。
-    grep -q '^S3 PASS' "$TMP_DIR/closure-recheck.log" \
-      || die "S3 未判 PASS（主仓消费面存在越界 import，或白名单空集）：$(grep '^S3 ' "$TMP_DIR/closure-recheck.log" || true)"
-    leg_n="$(sed -n 's/^LEGAL_IMPORT_PATHS_N=\([0-9][0-9]*\).*/\1/p' "$TMP_DIR/closure-recheck.log" | head -n 1)"
-    if [ "$leg_n" != "8" ]; then
-      die "S3 白名单表长度不为 8（实际 ${leg_n:-未取到}）：Go 侧 legalImportPaths 与 shell 硬编码 8 必须同批修改"
+    # S3 守卫（assert_s3_allowlist，三重）：S3 PASS + N=8（带 $ 行尾锚）+ 键串等值。
+    # Go 侧 legalImportPaths 表与 shell 侧 LEGAL_KEYS_EXPECTED / 8 是同一份契约的
+    # 两处表达，**必须同批修改**；(e3) 负例 3 专门证明「只守 N 会放过换键」。
+    s3_guard_rc=0
+    assert_s3_allowlist "$TMP_DIR/closure-recheck.log" || s3_guard_rc=$?
+    if [ "$s3_guard_rc" -ne 0 ]; then
+      die "S3 白名单守卫失败（rc=${s3_guard_rc}：1=S3未PASS / 2=N≠8 / 3=键串不符）：$(grep -E '^S3 |^LEGAL_IMPORT_PATHS_' "$TMP_DIR/closure-recheck.log" || true)"
     fi
     info "闭包计数（仅 INFO，不判红）：go_files=$(field total_go_files "$TMP_DIR/closure-recheck.json") test_files=$(field total_test_go_files "$TMP_DIR/closure-recheck.json") import_lines=$(field total_import_lines "$TMP_DIR/closure-recheck.json") group_hits=$(field total_group_hits "$TMP_DIR/closure-recheck.json")"
     # 冻结基线留证：用 HEAD 形式连暂存区一起核，字节不得变动。
@@ -287,13 +306,16 @@ FAKEGO
       [ -f scripts/closure-baseline.json ] || die "缺少 scripts/closure-baseline.json"
     fi
     if [ "$BASELINE_MODE" -eq 1 ]; then
-      # 历史专项复核（已退役、不判绿）：只打印冻结基线与实扫计数对照值供追溯。
+      # 历史专项复核（已退役、不判绿）：只打印对照值供**人工**追溯。
+      # R-04：rc 恒 0、无自动断言、无 DRIFT 标记，名字里的 "-baseline" 极易被误读成
+      # 「基线一致」。故显式给出预期阶段 4 漂移参照值，并写明仅人工复核、不判绿。
+      info "-baseline 预期阶段 4 漂移参照值（go_files/test_files/import_lines/group_hits）：1072/536/5875/93 → 1030/514/5743/35"
       for key in total_go_files total_test_go_files total_import_lines total_group_hits; do
         a="$(field "$key" scripts/closure-baseline.json)"
         b="$(field "$key" "$TMP_DIR/closure-recheck.json")"
-        info "-baseline 专项复核（仅 INFO，不判红）：${key} baseline=$a recheck=$b"
+        info "-baseline 专项复核（仅 INFO，不判绿）：${key} baseline=$a recheck=$b"
       done
-      info "-baseline 4 项计数强比对已退役为「阶段 3/4 import 改写前专项复核」；阶段 4 后漂移属预期，冻结基线不重算"
+      info "-baseline：**仅人工复核、不判绿、rc 恒 0**；4 项计数强比对已退役为「阶段 3/4 import 改写前专项复核」，阶段 4 后漂移属预期，冻结基线不重算"
     fi
     pass "两项真门禁零命中（parse_failures / forbidden_path_hits）+ S3 新库公开包白名单精确匹配（越界=0）"
   else
@@ -344,6 +366,31 @@ FAKEGO
   grep -q '^S3 FAIL' "$TMP_DIR/s3_neg2.log" \
     || die "S3 负例 2 缺 S3 FAIL 行：$(cat "$TMP_DIR/s3_neg2.log")"
   pass "S3 白名单负例 2：core/internal/x 前缀逃逸 → S3 FAIL / rc≠0（证明精确等值匹配，非 HasPrefix/Contains）"
+
+  #   负例 3（R-02）：保持 8 项、把规范键串里的 ref 换成 evil/pkg。
+  #     此时 N 仍为 8、两个 internal 负例仍全绿 ⇒ 旧守卫（只守条目数）会静默放行，
+  #     消费面被悄悄扩大。用正例 1 的**真实 cic 输出**派生样本（只替换键串行），
+  #     再喂给同一个 assert_s3_allowlist：必须判红（rc=3 键串不符）。
+  s3_keys_bad_log="$TMP_DIR/s3_keys_bad.log"
+  sed -E 's#^(LEGAL_IMPORT_PATHS_KEYS=.*),ref$#\1,evil/pkg#' \
+    "$TMP_DIR/s3_pos.log" > "$s3_keys_bad_log"
+  # 前置自证：样本确实仍是 S3 PASS + N=8（即「只守 N」的旧判据会放行），
+  # 且键串末尾已变成 evil/pkg；否则这条负例没有证明力。
+  grep -q '^S3 PASS' "$s3_keys_bad_log" \
+    || die "键串负例样本缺 S3 PASS 行（样本无效）：$(tail -n 3 "$s3_keys_bad_log")"
+  keys_bad_n="$(sed -n 's/^LEGAL_IMPORT_PATHS_N=\([0-9][0-9]*\)$/\1/p' "$s3_keys_bad_log" | head -n 1)"
+  [ "$keys_bad_n" = "8" ] \
+    || die "键串负例样本 N 不为 8（实际 ${keys_bad_n:-未取到}）：无法证明「只守条目数会放行」"
+  keys_bad_value="$(sed -n 's/^LEGAL_IMPORT_PATHS_KEYS=\(.*\)$/\1/p' "$s3_keys_bad_log" | head -n 1)"
+  case "$keys_bad_value" in
+    *,evil/pkg) : ;;
+    *) die "键串负例样本未生效（实际 ${keys_bad_value:-未取到}）：ref 未被替换为 evil/pkg" ;;
+  esac
+  rc=0
+  assert_s3_allowlist "$s3_keys_bad_log" || rc=$?
+  [ "$rc" -eq 3 ] \
+    || die "键串守卫未拦住静默换键（实际 rc=${rc}，期望 3=键串不符）：白名单可被保持 8 项悄悄扩大"
+  pass "S3 白名单负例 3：8 项不变、ref→evil/pkg 静默换键 → 键串等值比较判红（rc=3；只守 N=8 会放行）"
 
   # (e2) 新库零主仓依赖核验（verify 模式常驻门禁；go1.20 可跑）
   #   产品代码不得出现主仓/gmsm import 前缀；唯一白名单 scripts/verify_golden_against_main.go
@@ -654,7 +701,8 @@ DUMMYEXITGO
 }
 
 # ---------------------------------------------------------------------------
-# 🖥 真机段：本轮不执行（192.168.31.248 SSH 不可用 / 本机 go1.20.3；仅阶段 1+）
+# 🖥 真机段（仅阶段 1+；本脚本默认段不执行；门控 1–5 独立取证见
+#   F:/方案/_xfer/remote_logs/gate15.log 与方案 §8.4）
 #   - 新库侧全部 GOWORK=off；主仓侧必须在 go.work workspace 内，**勿加 GOWORK=off**
 #   - 门控 1–5 只有在本段实际跑通后才可判 PASS；本段是阶段 1/3/4 共用的门控入口
 #   - 所有 go test -run 必须「-v + 2>&1 | tee <file>」，再对**文件**做 === RUN 守卫：
@@ -801,7 +849,7 @@ case "${1:-}" in
 esac
 
 echo ""
-echo "🖥 真机段未执行（SSH 192.168.31.248 不可用 / 本机 go1.20.3）："
-echo "   空模块 go build、G1 真机判绿、go test ./...、cgo/!cgo 双构建、"
-echo "   CUDA/昇腾双构建、门控 1–5 均标「🖥 待环境就绪（未取证）」。"
-echo "   环境恢复后（仅阶段 1+）运行：bash scripts/verify_all.sh -remote"
+echo "本脚本未执行 -remote 段（本机 go1.20.3 无法编译 go 1.26.0 模块）："
+echo "   门控 1–5 独立取证见 F:/方案/_xfer/remote_logs/gate15.log 与方案 §8.4；"
+echo "   静态段 [STATIC-PASS] 不含任何门控 1–5 结论，不得冒充门控判绿。"
+echo "   真机环境就绪后（仅阶段 1+）运行：bash scripts/verify_all.sh -remote"
