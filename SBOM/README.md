@@ -34,3 +34,10 @@ syft packages dir:. -o cyclonedx-json@1.5 > SBOM/cdx.json
 
 > 阶段 2 补充：仅将 `cdx.json` 的 stage 标签由 `v0.0.0-stage0` 提升为 `v0.0.0-stage2`
 > （description 同步更新），`components` 仍为 `[]`——本阶段无第三方依赖引入。
+
+> 阶段 5 发布门禁补充（2026-11-07）：`cdx.json` 当前仍是 `v0.0.0-stage2`、
+> `components: []` 的**阶段 2 基线快照**；§5 阶段 0–4 未引入任何第三方依赖
+> （新库 `go.mod` 仍零 `require`），故本轮**不改产物**。按用户口径阶段 5 只交接不做：
+> SBOM 重生成属**阶段 5 发布门禁范围**，发布前须按上节「阶段 5 发布门禁复核项」
+> 由工具重生成，并同步删除主仓 `go.mod` 的 `replace ../masked-infer`、改正式版本号；
+> **禁止沿用本基线冒充发布产物**。

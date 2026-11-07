@@ -10,7 +10,7 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 
 ## 状态
 
-- **阶段 0 骨架、阶段 1（CA-1 / CA-2 解耦 + 5 包迁入）与阶段 2（ref/ 迁入 + 全库内部编号清理）已完成；阶段 3–4 待执行。**
+- **§5 阶段 0–4 已全部完成**（阶段 0 骨架 / 阶段 1 CA-1·CA-2 解耦与 5 包迁入 / 阶段 2 `ref/` 迁入与内部编号清理 / 阶段 3 CA-3·CA-4·CA-5 / 阶段 4 新库 `backend/` 接口与网关接线）；**阶段 5 按用户口径只交接不做**。完成状态与逐阶段证据见网关仓库 `docs/路线2-独立代码库拆分方案.md` §8.4。
 - 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取网关仓库 origin 所属账号
   `FengYang`，CI 变量 `SUB_ORG` 可覆写。
 - `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
@@ -24,11 +24,11 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 | `plan/` | TensorKey + 权重构建 | 已落地（阶段 1）：8 个 `.go` |
 | `ref/` | 去量化参照前向（数值对拍基准） | 已迁移（阶段 2）：plain_forward.go / plain_forward_test.go |
 | `demo/` | 合成小模型演示 | 已落地（阶段 1）：4 个 `.go` |
-| `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops | 规划中，尚未建包 |
+| `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops | **命名待定、未建包**（§7 `[ ]`；两库均无该包，不计入迁移内容） |
 | `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地（阶段 1）：12 个 `.go` |
 | `masklite/` | 纯标准库掩码流（CA-1） | 已落地（阶段 1）：`masklite.go` / `memzero.go` / `masklite_test.go` + `testdata/stream.golden` |
-| `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） | 待迁移（阶段 3） |
-| `backend/` | `MaskedInferenceBackend` 接口与构造器（接口定义在新库侧） | 待建（阶段 4） |
+| `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） | **不迁入**：`step_exec` 随 `tee-infer-service` 留网关侧（§3.1 / INV-3，见收官报告 D-STEP）；新库无 `step/` |
+| `backend/` | `MaskedInferenceBackend` 接口与构造器（接口定义在新库侧） | 已落地（阶段 4）：`backend/backend.go`（`5dcf210`） |
 
 ## 依赖方向与固定不变量
 
@@ -57,14 +57,21 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
   `accel`（cuda + ascend，🖥 待环境就绪，本轮禁用）五个 job。
 - **复验脚本分层（跨全部阶段共用，非阶段 0 专用、不另写新脚本）**：
   `bash scripts/verify_all.sh` 是**本地静态段（默认）**，适用阶段 0–4 全部阶段，覆盖
-  gofmt / G1 逻辑自检 / import 闭包三项真门禁 / 国密红线 / 许可自洽 / 仓库可 clone 留证，
-  结论统一以 `[STATIC-PASS]` 标注；`bash scripts/verify_all.sh -baseline` 供阶段 3/4
-  import 改写前做闭包 4 项计数强比对（默认弱校验，计数漂移不判红）。
+  gofmt / G1 逻辑自检 / import 闭包两项真门禁 + S3 新库公开包白名单（越界=0）/ 国密红线 /
+  许可自洽 / 仓库可 clone 留证，结论统一以 `[STATIC-PASS]` 标注；
+  `bash scripts/verify_all.sh -baseline` 的 4 项计数强比对已退役为「阶段 3/4 import
+  改写前专项复核」，只打印冻结基线与实扫计数对照值、不判红（冻结基线
+  `scripts/closure-baseline.json` 字节不重算）。
 - `bash scripts/verify_all.sh -remote` 是 **门控 1–5 的共用真机入口**（阶段 1/3/4 复用
   同一脚本同一段），**仅在阶段 1+ 且 Go 1.26 真机可用时执行**：新库侧 `GOWORK=off`、
   网关仓库侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
-- **阶段 0 / 1 只跑静态段**：真机段（`go build`、G1 真机判绿、cgo/!cgo 与 CUDA/昇腾双构建、
-  门控 1–5）一律标「🖥 待环境就绪（未取证）」；静态段 `[STATIC-PASS]` 不得冒充门控判绿。
+- **真机取证状态（2026-11-07）**：Go 1.26 真机 CPU 路径已取证，阶段 0–4 完成；
+  `go build ./...` / `go vet ./...` RC=0。§5.1 门控 1（6 测试）、门控 2
+  （`MaxAbsDiff=1.355e-05` / `1.329e-05`，`Top1=3/3`）、门控 3（282 步
+  `top-1=23811`、`PASS 107.64s`）已单列取证；**门控 4 的 `go test ./...` 全量实跑与
+  SBOM gate、门控 5 三次对拍本轮结果未取得，一律「🖥 待环境就绪 / 未取证」**；
+  门控 3 新库侧按 CA-2 裁定为 SKIP（测试留网关仓库），SKIP 不得写成 PASS。
+  **CUDA / 昇腾 GPU 轨道仍未取证**；静态段 `[STATIC-PASS]` 不得冒充门控判绿。
 
 ## 联调说明
 
@@ -94,9 +101,12 @@ code only; the service form is decided by the integrating party.
 
 ### Status
 
-- **Stage 0 skeleton, Stage 1 (CA-1 / CA-2 decoupling plus the 5-package
-  migration) and Stage 2 (ref/ migration + repository-wide internal numbering
-  cleanup) are complete; Stages 3–4 are pending.**
+- **Stages 0–4 of §5 are all complete** (Stage 0 skeleton; Stage 1 CA-1 / CA-2
+  decoupling plus the 5-package migration; Stage 2 `ref/` migration and internal
+  numbering cleanup; Stage 3 CA-3 / CA-4 / CA-5; Stage 4 the `backend/` interface
+  and gateway wiring). **Stage 5 is handover-only** per the user's decision.
+  Completion status and per-stage evidence: the gateway repository's
+  `docs/路线2-独立代码库拆分方案.md` §8.4.
 - Module path `github.com/FengYang/masked-infer`; `<org>` defaults to `FengYang`
   (owner of the main repository origin) and can be overridden by CI variable `SUB_ORG`.
 - `go 1.26.0`; `go.mod` has zero `require`, zero `replace`, zero third-party dependencies.
@@ -108,8 +118,11 @@ Landed in Stage 1: `core/` (10 `.go` files plus one each of `.h` / `.cu` / `.cpp
 `core/trustedops/` (7 `.go`), `plan/` (8 `.go`), `demo/` (4 `.go`),
 `adapters/qwen/` (12 `.go`) and `masklite/` (`masklite.go`, `memzero.go`,
 `masklite_test.go` plus `testdata/stream.golden`).
-Still pending: `step/` (Stage 3) and `backend/` (Stage 4). `ref/` was migrated in Stage 2.
-`adapterkit/` is planned but not created yet.
+`ref/` was migrated in Stage 2; `backend/` landed in Stage 4 (`backend/backend.go`).
+`step/` is **not migrated**: `step_exec` stays in the gateway's `tee-infer-service`
+(§3.1 / INV-3, see report D-STEP), so this repository has no `step/` directory.
+`adapterkit/` naming is undecided and the package has not been created (§7 `[ ]`;
+not part of the migration).
 
 ### Boundaries and invariants
 
@@ -141,12 +154,20 @@ Still pending: `step/` (Stage 3) and `backend/` (Stage 4). `ref/` was migrated i
   `accel` (cuda + ascend, 🖥 environment-pending, disabled in this round) jobs.
 - One verification script, shared across all stages (not Stage-0-only, no separate
   script): `bash scripts/verify_all.sh` runs the local static segment by default
-  (valid for every stage, results tagged `[STATIC-PASS]`); the `-baseline` mode
-  re-checks the import-closure counters before Stage 3/4 import rewrites;
+  (valid for every stage, results tagged `[STATIC-PASS]`); the `-baseline` mode's
+  four-counter strict comparison has been retired to a "pre-Stage-3/4 import
+  rewrite" historical check that prints the frozen baseline vs. live counters
+  without gating (the frozen `scripts/closure-baseline.json` is never recomputed);
   `bash scripts/verify_all.sh -remote` is the shared entry point for gates 1–5,
-  executable only from Stage 1 onward with a Go 1.26 machine. Stages 0 and 1 run the
-  static segment only; every machine-side item remains 🖥 environment-pending (no
-  evidence collected), and `[STATIC-PASS]` must never be read as a gate 1–5 pass.
+  executable only from Stage 1 onward with a Go 1.26 machine. As of 2026-11-07 the
+  Go 1.26 CPU path has been evidenced: `go build ./...` / `go vet ./...` return RC=0,
+  and gates 1 (6 tests), 2 (`MaxAbsDiff=1.355e-05` / `1.329e-05`, `Top1=3/3`) and 3
+  (282 steps, `top-1=23811`, `PASS 107.64s`) are individually evidenced. Gate 4's
+  full `go test ./...` run and SBOM gate, and gate 5's three cross-checks, were not
+  obtained this round and remain 🖥 environment-pending / not evidenced. Gate 3 on
+  this repository's side is SKIP (the test stays in the gateway per CA-2); a SKIP
+  must never be reported as PASS. The CUDA / Ascend GPU track is also 🖥 not evidenced.
+  `[STATIC-PASS]` must never be read as a gate 1–5 pass.
 
 ### Workspace note
 
