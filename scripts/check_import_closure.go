@@ -103,6 +103,62 @@ var verifyModeWhitelist = map[string]bool{
 	"scripts/verify_golden_against_main.go": true,
 }
 
+// newRepoModulePrefix 是主仓 import 新库时使用的 module 前缀，供 S3 归一化使用。
+const newRepoModulePrefix = "github.com/FengYang/masked-infer/"
+
+// legalImportPaths 是阶段 4 起「主仓允许 import 的新库公开包」白名单（8 项，精确等值）。
+//
+// 为什么是「公开包白名单」而不是「零交叉」：S3 原本是阶段 0/1 的过渡期判据（主仓不得
+// 反向 import 新库）。阶段 4 起网关按 CA-5 合法消费新库（go.mod require + orchestrator
+// 等宿主包 import 新库公开包），实测 47 条命中全部合法 ⇒ 「零交叉」必然恒红。
+// 真正该守的边界变成：主仓只能消费**新库公开包**，不得伸进 internal 或非公开包。
+//
+// 匹配口径必须是 map **精确等值**（归一后的整串作键），不得用 HasPrefix/Contains：
+// `core/trustedopsX`、`plan2`、`internal/x` 这类在模糊匹配下会被误放行。
+// 白名单为空集时 S3 直接 FAIL（fail-closed），见 newRepoCrossAllowed。
+//
+// 与 scripts/verify_all.sh 的 LEGAL_IMPORT_PATHS_N=8 守卫是同一份契约的两处表达：
+// 本表增减条目时，shell 侧硬编码的 8 必须**同批修改**，否则门禁会以假红挡住变更。
+var legalImportPaths = map[string]bool{
+	"plan":            true,
+	"core":            true,
+	"demo":            true,
+	"adapters/qwen":   true,
+	"core/trustedops": true,
+	"masklite":        true,
+	"backend":         true,
+	"ref":             true,
+}
+
+// newRepoCrossAllowed 判定 baseline 模式 S3：主仓 import 新库的路径必须全部落在公开包白名单内。
+//
+// hits 为 scan() 产出的 `"<rel>: <importPath>"` 形态（见本文件 :285 的 fmt.Sprintf）。
+// 取后半段 → 去 newRepoModulePrefix → 精确等值查表。归一命中集合必须 ⊆ legalImportPaths，
+// 即「越界数 == 0」是唯一真门禁；归一后 internal/* 不在表内，自动判红。
+//
+// 返回 命中数 / 白名单数 / 越界数 / 是否通过。白名单缺失或空集一律 FAIL（fail-closed）；
+// 命中数为 0 且白名单非空属正常演进，不判红（公开包暂未被消费由 go build ./... / G1 兜底）。
+func newRepoCrossAllowed(hits []string) (hitCount int, allowedCount int, outCount int, pass bool) {
+	if len(legalImportPaths) == 0 {
+		return len(hits), 0, len(hits), false
+	}
+	for _, hit := range hits {
+		_, importPath, found := strings.Cut(hit, ": ")
+		if !found {
+			// 形态异常时整条作为路径参与精确匹配：必然不在表内 ⇒ 判红，不静默放行。
+			importPath = hit
+		}
+		normalized := strings.TrimPrefix(importPath, newRepoModulePrefix)
+		hitCount++
+		if legalImportPaths[normalized] {
+			allowedCount++
+		} else {
+			outCount++
+		}
+	}
+	return hitCount, allowedCount, outCount, outCount == 0
+}
+
 type Hit struct {
 	File       string `json:"file"`
 	Line       int    `json:"line"`
@@ -118,11 +174,12 @@ type SelfCheck struct {
 // Report 是扫描报告（JSON 结构与已提交基线 scripts/closure-baseline.json 逐字节绑定：
 // 字段名、顺序、omitempty 一律不可改，否则 baseline 的 cmp 会失败）。
 //
-// 读 total_group_hits 时的注意事项（本字段不参与 verify 判定，仅 baseline 计数强比对用）：
+// 读 total_group_hits 时的注意事项（本字段不参与任何门禁判定，仅供计数对照）：
 //   - verify 模式下该字段**含新库自引用噪声，不是主仓依赖**。扫新库时 `…/core/trustedops`
 //     会命中短键 `trustedops` 而被计入（实测 group_hits=2），那是 core 引用自己的子包，正常。
-//   - 判断「新库是否依赖主仓」请只看 forbidden_prefix_hits（S6 判据）与 new_repo_cross_hits，
-//     不要看 total_group_hits。
+//   - 判断「新库是否依赖主仓」请只看 forbidden_prefix_hits（S6 判据）；
+//     new_repo_cross_hits 记的是**主仓 import 新库**的命中（baseline 模式 S3 的输入），
+//     方向恰好相反，不能用来判断新库是否依赖主仓；也不要看 total_group_hits。
 type Report struct {
 	Schema             string              `json:"schema"`
 	Mode               string              `json:"mode"`
@@ -368,8 +425,10 @@ func evaluate(report *Report) {
 			}
 		}
 		add("S2", closed, "闭集分组数=%d（8 个被迁出包 + cipher/mask），全部键在预定义闭集内", len(report.Groups))
-		add("S3", len(report.NewRepoCrossHits) == 0,
-			"与新库零交叉（new_repo_cross_hits=%d）", len(report.NewRepoCrossHits))
+		hitN, allowedN, outN, s3Pass := newRepoCrossAllowed(report.NewRepoCrossHits)
+		add("S3", s3Pass,
+			"新库公开包白名单精确匹配（命中=%d 白名单=%d 越界=%d；白名单表=%d 项，空集即 FAIL）",
+			hitN, allowedN, outN, len(legalImportPaths))
 	}
 
 	add("S4", len(report.ForbiddenPathHits) == 0,
@@ -424,8 +483,11 @@ func main() {
 	// 模式职责分工（勿删；S2/S3 在 verify 下 SKIP 是刻意设计，不是遗漏或"悄悄删掉"）：
 	//
 	//	-mode baseline（-root <主仓>）：
-	//	    S2 闭集分组 + S3 new_repo_cross_hits 真判 —— 守「主仓不得反向 import 新库」的
-	//	    方向性约束（阶段 4 删包后仍需长期持续守）。
+	//	    S2 闭集分组真判；S3 是**阶段 0/1 的过渡期判据**（守「主仓不得反向
+	//	    import 新库」）。阶段 4 起网关按 CA-5 合法消费新库（go.mod require +
+	//	    orchestrator / tee-infer-service 等宿主包 import 新库公开包），「零交叉」
+	//	    不再成立，故 S3 已由「新库公开包白名单精确匹配（越界=0）」替代：
+	//	    守的是消费面不得越界伸进 internal / 非公开包，而不是禁止消费本身。
 	//
 	//	-mode verify（-root <新库>）：
 	//	    S6 真判（新库不得 import 主仓前缀 / 第三方向量前缀），配合 S1 解析零失败与
@@ -480,6 +542,9 @@ func main() {
 	}
 	fmt.Printf("BASELINE_SUMMARY go_files=%d test_files=%d import_lines=%d group_hits=%d\n",
 		report.TotalGoFiles, report.TotalTestGoFiles, report.TotalImportLines, report.TotalGroupHits)
+	// 供 scripts/verify_all.sh 的 S3 守卫做数值比对（取表长度，不另写常量）：
+	// Go 侧白名单表与 shell 侧硬编码 8 必须同批修改，任一侧漂移都会被门禁挡住。
+	fmt.Printf("LEGAL_IMPORT_PATHS_N=%d\n", len(legalImportPaths))
 	for _, key := range report.GroupKeys {
 		fmt.Printf("  group %-38s import_hits=%d importer_files=%d own_files=%d\n",
 			key, report.GroupHitCounts[key], report.GroupFileCounts[key], report.GroupOwnCounts[key])
