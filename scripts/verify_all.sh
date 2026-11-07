@@ -10,7 +10,8 @@
 #
 # 用法：
 #   bash scripts/verify_all.sh             # 本地静态段（本机可执行，无需 Go 1.26；闭包默认弱校验）
-#   bash scripts/verify_all.sh -baseline   # 静态段 + 闭包 4 项计数强比对（阶段 3/4 import 改写前复核）
+#   bash scripts/verify_all.sh -baseline   # 静态段 + 历史专项复核（阶段 3/4 import 改写前口径，
+#                                        #   已退役：只打印冻结基线与实扫计数对照值，不判红）
 #   bash scripts/verify_all.sh -remote     # 🖥 真机段（仅阶段 1+；本轮不执行）
 #   亦可用环境变量 VERIFY_BASELINE=1 触发 -baseline 语义。
 set -euo pipefail
@@ -244,12 +245,16 @@ FAKEGO
   fi
   pass "G1 场景 D：0 deps → 空集判绿文案（静态注入样本；实质闭包须真机 go list -test -deps 复验，🖥 未取证）"
 
-  # (e) check_import_closure.go 基线复核（纯标准库，go1.20 可跑）
-  #   默认弱校验：只断言三项真门禁为空（parse_failures / forbidden_path_hits /
-  #   new_repo_cross_hits）；4 项计数仅 INFO 打印、不判红。阶段 1+ 迁包、阶段 3/4
-  #   删包改 import 后计数必然漂移，强比对会误报失败，违背「不破坏已有功能」。
-  #   阶段 3/4 import 改写前须用 -baseline 复核；基线确认漂移时用工具显式重生成
-  #   scripts/closure-baseline.json 并提交，两侧同批评审。
+  # (e) check_import_closure.go 主仓消费面复核（纯标准库，go1.20 可跑）
+  #   默认弱校验：只断言两项真门禁为空（parse_failures / forbidden_path_hits）；
+  #   S3 由 Go 侧「新库公开包 8 项精确等值白名单（越界=0）」判定，shell 侧再核
+  #   S3 PASS 与白名单表长度 LEGAL_IMPORT_PATHS_N=8（见下方守卫）。
+  #   4 项计数仅 INFO 打印、不判红：阶段 4 网关已按 CA-5 合法消费新库，主仓删包后
+  #   计数（1030/514/5743/35）相对冻结基线（1072/536/5875/93）漂移属预期。
+  #   scripts/closure-baseline.json 是**冻结的历史快照**：重算基线等于把阶段 4 漂移
+  #   固化成新期望值（已否决的「改期望值」陷阱），故本段用 git diff --exit-code 守其
+  #   字节不变；-baseline 的 4 项强比对已退役为「阶段 3/4 import 改写前专项复核」，
+  #   只打印对照值供追溯、不参与判绿，默认段完全跳过。
   if [ -d "$MAIN_REPO" ]; then
     # WARN-10：先 go build 到临时可执行文件再执行，去掉对 `go run` 临时目录执行权限的依赖。
     GO111MODULE=off go build -o "$BUILD_DIR/cic" scripts/check_import_closure.go \
@@ -257,25 +262,88 @@ FAKEGO
     "$BUILD_DIR/cic" \
       -root "$MAIN_REPO" -mode baseline -out "$TMP_DIR/closure-recheck.json" \
       > "$TMP_DIR/closure-recheck.log" 2>&1 || die "闭包扫描失败: $(cat "$TMP_DIR/closure-recheck.log")"
-    for key in parse_failures forbidden_path_hits new_repo_cross_hits; do
+    for key in parse_failures forbidden_path_hits; do
       grep -q "\"${key}\": \[\]" "$TMP_DIR/closure-recheck.json" \
         || die "闭包真门禁 ${key} 非空（详见 $TMP_DIR/closure-recheck.json）"
     done
+    # S3 守卫：Go 侧白名单判据必须判 PASS，且白名单表长度恒为 8。
+    # 数值比较（取值后比较）而非 `grep -E '^...=8'` 前缀命中即过：后者没有尾锚，
+    # `=80` 也以 `=8` 开头，白名单被扩到 80 项照样放行；取不到（空串）同样判红，
+    # 否则工具一旦停止打印该行，守卫就静默失效。Go 侧 legalImportPaths 表长度与
+    # shell 硬编码 8 是同一份契约的两处表达，**必须同批修改**。
+    grep -q '^S3 PASS' "$TMP_DIR/closure-recheck.log" \
+      || die "S3 未判 PASS（主仓消费面存在越界 import，或白名单空集）：$(grep '^S3 ' "$TMP_DIR/closure-recheck.log" || true)"
+    leg_n="$(sed -n 's/^LEGAL_IMPORT_PATHS_N=\([0-9][0-9]*\).*/\1/p' "$TMP_DIR/closure-recheck.log" | head -n 1)"
+    if [ "$leg_n" != "8" ]; then
+      die "S3 白名单表长度不为 8（实际 ${leg_n:-未取到}）：Go 侧 legalImportPaths 与 shell 硬编码 8 必须同批修改"
+    fi
     info "闭包计数（仅 INFO，不判红）：go_files=$(field total_go_files "$TMP_DIR/closure-recheck.json") test_files=$(field total_test_go_files "$TMP_DIR/closure-recheck.json") import_lines=$(field total_import_lines "$TMP_DIR/closure-recheck.json") group_hits=$(field total_group_hits "$TMP_DIR/closure-recheck.json")"
+    # 冻结基线留证：用 HEAD 形式连暂存区一起核，字节不得变动。
+    if [ -d .git ]; then
+      git diff --exit-code HEAD -- scripts/closure-baseline.json \
+        || die "冻结基线 scripts/closure-baseline.json 被改动：禁止重算基线固化阶段 4 漂移"
+      info "冻结基线 scripts/closure-baseline.json 字节未变（git diff --exit-code HEAD 通过）"
+    else
+      [ -f scripts/closure-baseline.json ] || die "缺少 scripts/closure-baseline.json"
+    fi
     if [ "$BASELINE_MODE" -eq 1 ]; then
-      [ -f scripts/closure-baseline.json ] || die "-baseline 模式缺少 scripts/closure-baseline.json"
+      # 历史专项复核（已退役、不判绿）：只打印冻结基线与实扫计数对照值供追溯。
       for key in total_go_files total_test_go_files total_import_lines total_group_hits; do
         a="$(field "$key" scripts/closure-baseline.json)"
         b="$(field "$key" "$TMP_DIR/closure-recheck.json")"
-        [ -n "$a" ] && [ "$a" = "$b" ] || die "-baseline 强比对 $key 不一致: baseline=$a recheck=$b"
+        info "-baseline 专项复核（仅 INFO，不判红）：${key} baseline=$a recheck=$b"
       done
-      pass "闭包基线 4 项计数强比对通过（-baseline 模式）"
-    else
-      pass "import 闭包三项真门禁零命中（parse_failures / forbidden_path_hits / new_repo_cross_hits）"
+      info "-baseline 4 项计数强比对已退役为「阶段 3/4 import 改写前专项复核」；阶段 4 后漂移属预期，冻结基线不重算"
     fi
+    pass "两项真门禁零命中（parse_failures / forbidden_path_hits）+ S3 新库公开包白名单精确匹配（越界=0）"
   else
     skip "主仓目录不存在，跳过闭包复核（CI GOWORK=off 场景）"
   fi
+
+  # (e3) S3 新库公开包白名单负向对照自测（形态仿 (d) 场景 A/B/C/D）
+  #   用 TMP_DIR 里的假仓库注入**单条** import，跑同一个 cic 二进制的 baseline 模式，
+  #   证明判据不是「永远绿」，且白名单是精确等值而非前缀/包含匹配：
+  #     正例 1：合法公开包 …/core                  → S3 PASS / rc=0
+  #     负例 1：越界包 …/internal/x               → S3 FAIL / rc≠0（越界=1）
+  #     负例 2：近似前缀逃逸 …/core/internal/x    → S3 FAIL / rc≠0
+  #             （若用 HasPrefix/Contains，会以 core 为前缀误放行，故专设此例）
+  # (e) 在主仓存在时已构建过 cic；仅在主仓目录不存在（跳过 (e)）时补建，
+  # 避免重复写同一个可执行文件（本机杀软会启发式扫描新生成的 exe）。
+  if [ ! -x "$BUILD_DIR/cic" ]; then
+    GO111MODULE=off go build -o "$BUILD_DIR/cic" scripts/check_import_closure.go \
+      || die "check_import_closure.go 构建失败（S3 负向对照自测）"
+  fi
+  s3_probe_root="$TMP_DIR/s3_probe"
+  mkdir -p "$s3_probe_root"
+  s3_probe() {  # <label> <import_path> → 回显 cic 的 rc
+    local label="$1" import_path="$2" d rc
+    d="$s3_probe_root/$label"
+    mkdir -p "$d"
+    printf 'package probe\n\nimport _ "%s"\n' "$import_path" > "$d/probe.go"
+    rc=0
+    "$BUILD_DIR/cic" -root "$d" -mode baseline > "$TMP_DIR/s3_${label}.log" 2>&1 || rc=$?
+    printf '%s\n' "$rc"
+  }
+  s3_pos_rc="$(s3_probe pos 'github.com/FengYang/masked-infer/core')"
+  [ "$s3_pos_rc" -eq 0 ] \
+    || die "S3 正例（合法公开包 core）未判绿：rc=${s3_pos_rc} out=$(cat "$TMP_DIR/s3_pos.log")"
+  grep -q '^S3 PASS' "$TMP_DIR/s3_pos.log" \
+    || die "S3 正例缺 S3 PASS 行：$(cat "$TMP_DIR/s3_pos.log")"
+  pass "S3 白名单正例 1：合法公开包 core → S3 PASS / rc=0"
+
+  s3_neg1_rc="$(s3_probe neg1 'github.com/FengYang/masked-infer/internal/x')"
+  [ "$s3_neg1_rc" -ne 0 ] \
+    || die "S3 负例 1（internal/x 越界）未判红：rc=${s3_neg1_rc} out=$(cat "$TMP_DIR/s3_neg1.log")"
+  grep -q '^S3 FAIL' "$TMP_DIR/s3_neg1.log" \
+    || die "S3 负例 1 缺 S3 FAIL 行：$(cat "$TMP_DIR/s3_neg1.log")"
+  pass "S3 白名单负例 1：越界 internal/x → S3 FAIL / rc≠0（越界=1，internal/* 自动判红）"
+
+  s3_neg2_rc="$(s3_probe neg2 'github.com/FengYang/masked-infer/core/internal/x')"
+  [ "$s3_neg2_rc" -ne 0 ] \
+    || die "S3 负例 2（core/internal/x 前缀逃逸）未判红：rc=${s3_neg2_rc} out=$(cat "$TMP_DIR/s3_neg2.log")"
+  grep -q '^S3 FAIL' "$TMP_DIR/s3_neg2.log" \
+    || die "S3 负例 2 缺 S3 FAIL 行：$(cat "$TMP_DIR/s3_neg2.log")"
+  pass "S3 白名单负例 2：core/internal/x 前缀逃逸 → S3 FAIL / rc≠0（证明精确等值匹配，非 HasPrefix/Contains）"
 
   # (e2) 新库零主仓依赖核验（verify 模式常驻门禁；go1.20 可跑）
   #   产品代码不得出现主仓/gmsm import 前缀；唯一白名单 scripts/verify_golden_against_main.go
@@ -621,24 +689,16 @@ run_remote() {
   GOWORK=off ACCEL_BACKEND_LIB=cuda CGO_ENABLED=1 go build ./...
   GOWORK=off ACCEL_BACKEND_LIB=ascend CGO_ENABLED=1 go build ./...
 
-  # 门控 3（新库侧）：阶段 3 起 golden 测试随 step/ 迁入新库、CA-3 改造对象也在新库，
-  # 必须验新库侧。
-  # 守卫必须绑「该测试文件」而非「其父目录」：阶段 1 已迁入 adapters/qwen（目录存在），
-  # 但 route2step_golden_test.go 阶段 3 才迁 ⇒ 用 -d 判目录会在阶段 1/2 误入本分支，
-  # 导致 -run 无匹配（go test rc=0、无 === RUN）被 assert_run 判红，真机段恒失败。
-  # 改为 -f 判文件：阶段 3 迁入该测试后自动生效。
+  # 门控 3（新库侧）：F-05 订正。按 CA-2 / D-CA2 裁定，route2step_golden_test.go
+  # **从未迁入新库**，真测试留在主仓
+  # gateway/tee-infer-service/route2step/qwen_golden_test.go:68，
+  # 由下方主仓侧 gate3_main.log 覆盖。
+  # 旧守卫 -f "$SUB_REPO/adapters/qwen/route2step_golden_test.go" 恒不成立，且 SKIP
+  # 文案误称「阶段 3 迁入后自动生效」（阶段 3 已完成，迁入按裁定不会发生）⇒ 删除该
+  # 恒假分支，改为显式登记。**SKIP 仍是 SKIP，不得写成 PASS**。
+  # GATE3_SUB_RAN 保持 0：段末总闸据此不要求 gate3_sub.log 存在。
   GATE3_SUB_RAN=0
-  if [ -f "$SUB_REPO/adapters/qwen/route2step_golden_test.go" ]; then
-    GATE3_SUB_RAN=1
-    (
-      cd "$SUB_REPO"
-      GOWORK=off go test ./adapters/qwen/... -run TestRoute2StepRealQwenGolden \
-        -count=1 -v 2>&1 | tee "$TMP_DIR/gate3_sub.log"
-    )
-    assert_run_strict "$TMP_DIR/gate3_sub.log" "门控3(新库侧)" TestRoute2StepRealQwenGolden
-  else
-    echo "SKIP: 门控3 新库侧（adapters/qwen/route2step_golden_test.go 尚未迁入，阶段 3 迁入后自动生效）"
-  fi
+  echo "SKIP: 门控3 新库侧（按 CA-2 裁定测试留主仓 gateway/tee-infer-service/route2step/qwen_golden_test.go，新库侧不启用；SKIP = 未取证，由主仓侧 gate3_main.log 覆盖）"
 
   # 主仓：在 go.work workspace 内跑全量回归（勿加 GOWORK=off）
   (
@@ -717,12 +777,12 @@ run_remote() {
   if [ "$total_skips" -gt 0 ]; then
     die "真机段累计 ${total_skips} 条 --- SKIP 用例（strict 计数=${REMOTE_SKIPS}，日志复扫=${local_gate_skips}）：按门控规范判未取证，禁止输出段末判绿标记"
   fi
-  # 文案不得超出实际取证范围：阶段 1/2 门控 3 新库侧按设计未启用（测试文件阶段 3 才迁入），
-  # 此时不能笼统宣称「门控 1–5 已实际取证」，须显式标出哪一项未启用。
+  # 文案不得超出实际取证范围：门控 3 新库侧按 CA-2 裁定不启用（测试留主仓），
+  # 此时不能笼统宣称「门控 1–5 已实际取证」，须显式标出该 SKIP 项。
   if [ "$GATE3_SUB_RAN" -eq 1 ]; then
     echo "[REMOTE-PASS] 真机段完成：门控 1–5 已实际取证（0 条 SKIP；含门控 3 新库侧）"
   else
-    echo "[REMOTE-PASS] 真机段完成：门控 1–4 / 5（主仓侧）已实际取证（0 条 SKIP）；门控 3 新库侧按设计未启用（阶段 3 迁入 route2step_golden_test.go 后自动生效）"
+    echo "[REMOTE-PASS] 真机段完成：门控 1–4 / 5（主仓侧）已实际取证（0 条 SKIP）；门控 3 新库侧按 CA-2 裁定不启用（测试留主仓，由 gate3_main.log 覆盖；SKIP = 未取证）"
   fi
 }
 
