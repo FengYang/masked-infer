@@ -30,6 +30,15 @@ func InitAccelBackend(paths ...string) error {
 	return ErrAccelUnavailable
 }
 
+// SwitchDefaultBackend 与 cgo 版同名导出；无 CGO 时恒返回 ErrAccelUnavailable。
+func SwitchDefaultBackend(hint string) error { return ErrAccelUnavailable }
+
+// CurrentDefaultBackend 与 cgo 版同名导出；无 CGO 时恒为空。
+func CurrentDefaultBackend() string { return "" }
+
+// AccelCandidates 与 cgo 版同名导出；无 CGO 时恒为空。
+func AccelCandidates() []string { return nil }
+
 // AcquireAccelBackend 与 cgo 版同名导出；无 CGO 时恒返回 ErrAccelUnavailable。
 func AcquireAccelBackend(hint string) (*AccelBackend, error) {
 	return nil, ErrAccelUnavailable

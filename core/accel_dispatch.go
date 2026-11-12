@@ -280,6 +280,64 @@ func (p *AccelPool) Acquire(hint string) (*AccelBackend, error) {
 	return nil, p.defaultErr
 }
 
+// SwitchDefaultBackend 运行期切换默认加速后端（M5-2 调度 API 的执行点）：
+//   - hint 必须是候选列表内 key（信任输入不变），否则拒绝；
+//   - 目标后端经 per-key 惰性加载 + 路径/ABI 校验后，原子换入默认解析结果；
+//   - 换入后 Acquire("")/AccelLinearInt128 立即走新后端；评估中请求仍用已取得的旧后端句柄；
+//   - 失败保持原默认后端不变（fail-safe）。
+func (p *AccelPool) SwitchDefaultBackend(hint string) error {
+	if p.poolOff {
+		return fmt.Errorf("%w: ACCEL_POOL=off 已禁用运行期后端选择", ErrAccelUnavailable)
+	}
+	key := strings.TrimSpace(hint)
+	if key == "" {
+		return fmt.Errorf("%w: 切换 key 不可为空", ErrAccelUnavailable)
+	}
+	p.mu.RLock()
+	inOrder := false
+	for _, k := range p.order {
+		if k == key {
+			inOrder = true
+			break
+		}
+	}
+	p.mu.RUnlock()
+	if !inOrder {
+		return fmt.Errorf("%w: 切换目标 %q 不在候选列表（拒绝运行期注入任意路径）", ErrAccelUnavailable, key)
+	}
+	b, err := p.get(key)
+	if err != nil {
+		return fmt.Errorf("%w: 切换目标加载失败（保持原默认）: %v", ErrAccelUnavailable, err)
+	}
+	p.mu.Lock()
+	p.defaultKey, p.defaultErr, p.resolved = b.key, nil, true
+	p.mu.Unlock()
+	return nil
+}
+
+// CurrentDefault 返回当前默认后端 key（空串 = 尚未解析/无可用后端）。
+func (p *AccelPool) CurrentDefault() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.defaultKey
+}
+
+// Candidates 返回候选列表快照（安装期受信输入，供管理 API 只读展示）。
+func (p *AccelPool) Candidates() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return append([]string(nil), p.order...)
+}
+
+// SwitchDefaultBackend 全局池入口（M5-2 管理 API 调用）。
+func SwitchDefaultBackend(hint string) error { return defaultPool().SwitchDefaultBackend(hint) }
+
+// CurrentDefaultBackend 全局池当前默认后端 key。
+func CurrentDefaultBackend() string { return defaultPool().CurrentDefault() }
+
+// AccelCandidates 全局池候选列表快照。
+func AccelCandidates() []string { return defaultPool().Candidates() }
+
 // AcquireAccelBackend 全局池入口：按 hint 选择加速后端（hint 空 = 默认候选序首个可用）。
 // 网关侧 route2step/adapter 可按请求上下文透传 hint（M5-2 调度 API 的落点；一期可全默认）。
 func AcquireAccelBackend(hint string) (*AccelBackend, error) {

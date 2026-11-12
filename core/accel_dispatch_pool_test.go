@@ -325,3 +325,50 @@ func TestAccelPoolFallbackNoBackend(t *testing.T) {
 		t.Fatal("无候选时 AcquireAccelBackend 应返回错误")
 	}
 }
+
+// TestAccelPoolSwitchDefaultBackend M5-2：运行期切换默认后端（同进程管理 API 执行点）。
+func TestAccelPoolSwitchDefaultBackend(t *testing.T) {
+	dir := t.TempDir()
+	soA := poolFixtureSo(t, dir, "libaccel_sw_a.so", 1)
+	soB := poolFixtureSo(t, dir, "libaccel_sw_b.so", 1)
+
+	p := setGlobalPoolOrder(t, []string{soA, soB}, false)
+	if _, err := p.Acquire(""); err != nil {
+		t.Fatalf("首载失败: %v", err)
+	}
+	if got := p.CurrentDefault(); got != soA {
+		t.Fatalf("初始默认应为 soA，got %q", got)
+	}
+	if err := p.SwitchDefaultBackend(soB); err != nil {
+		t.Fatalf("切换失败: %v", err)
+	}
+	if got := p.CurrentDefault(); got != soB {
+		t.Fatalf("切换后默认应为 soB，got %q", got)
+	}
+	b, err := p.Acquire("")
+	if err != nil || b.key != soB {
+		t.Fatalf("切换后 Acquire(\"\") 应走 soB: b=%v err=%v", b, err)
+	}
+	// 非法 key（不在候选列表）拒绝且保持原默认。
+	outside := poolFixtureSo(t, dir, "libaccel_sw_outside.so", 1)
+	if err := p.SwitchDefaultBackend(outside); err == nil {
+		t.Fatal("不在候选列表的切换应拒绝")
+	}
+	if got := p.CurrentDefault(); got != soB {
+		t.Fatalf("失败切换不应改变默认，got %q", got)
+	}
+	if c := p.Candidates(); len(c) != 2 || c[0] != soA || c[1] != soB {
+		t.Fatalf("候选列表快照异常: %v", c)
+	}
+}
+
+// TestAccelPoolSwitchDefaultBackendOff ACCEL_POOL=off 拒绝运行期切换（回滚开关语义）。
+func TestAccelPoolSwitchDefaultBackendOff(t *testing.T) {
+	dir := t.TempDir()
+	soA := poolFixtureSo(t, dir, "libaccel_offsw_a.so", 1)
+	soB := poolFixtureSo(t, dir, "libaccel_offsw_b.so", 1)
+	p := setGlobalPoolOrder(t, []string{soA, soB}, true)
+	if err := p.SwitchDefaultBackend(soB); err == nil {
+		t.Fatal("off 模式应拒绝运行期切换")
+	}
+}
