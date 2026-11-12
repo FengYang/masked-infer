@@ -1,11 +1,24 @@
 //go:build cgo
 
-// accel_dispatch.go — 掩码线性加速后端（CUDA / 华为昇腾）运行时派发。
+// accel_dispatch.go — 掩码线性加速后端（CUDA / 华为昇腾）运行时派发【M5-1 池化版】。
 //
-// 设计（路线2 步骤③ 多后端统一架构）：
-//   - 网关侧不感知硬件厂商；仅按部署环境（env ACCEL_BACKEND_LIB，逗号分隔候选路径）
-//     用 dlopen 加载对应 .so（libaccel_cuda.so / libaccel_ascend.so），
+// 设计（路线2 步骤③ 多后端统一架构 + 网关侧缺口整改 M5-1）：
+//   - 网关侧不感知硬件厂商；按部署环境（env ACCEL_BACKEND_LIB，逗号分隔受信绝对路径候选）
+//     构建 AccelPool，per-key 惰性 dlopen 对应 .so（libaccel_cuda.so / libaccel_ascend.so），
 //     并解析统一的 C ABI 符号 accel_cipher_linear_int128（见 accel_linear_int128.h）。
+//   - 池化语义（技术实现方案 §4）：
+//       · 多后端可同时加载（池内 N 个 .so），按 key（= 受信绝对路径）选择（Acquire(hint)）；
+//       · 候选序（order）来自 ACCEL_BACKEND_LIB / InitAccelBackend，作为默认与回退序；
+//       · 默认行为（hint=""）与旧版 sync.Once 一次性加载完全等价：按序首个可用者胜出，
+//         全部失败缓存错误（不重试），AccelLinearInt128 返回 ErrAccelUnavailable 由调用方回退 CPU；
+//       · per-key 单飞加载（loadMu 序列化 + 双重检查），并发安全（-race 全绿）；
+//       · 不做 dlclose（函数指针与句柄进程生命周期内常驻，与旧版一致，避免符号卸载风险）。
+//   - 安全约束不放松（Sec-C1）：池内每个成员仍须经 validateAccelLibPath（绝对路径/普通文件/
+//     非符号链接/group·other 不可写），且 ABI 版本须与 accelLinearInt128ABIVersion 一致；
+//     hint 仅接受候选列表内的 key（信任输入不变，禁止运行期注入任意路径）。
+//   - 回滚开关（技术实现方案 §4.5）：env ACCEL_POOL=off → 禁用运行期多后端选择
+//     （Acquire(hint≠"") 拒绝），默认候选序回退行为与旧实现一致；或直接回退 masked-infer
+//     版本（两仓版本解耦，网关 go.mod pin）。
 //   - 后端不可用（未配置 / 加载失败 / 调用失败）时，AccelLinearInt128 返回
 //     ErrAccelUnavailable，调用方应回退到 CPU 路径 CipherLinearInt128（int128_linear.go）。
 //   - 算法正确性已由 CipherLinearInt128 与 math/big 神谕逐位对拍锁定，各加速后端仅替换执行后端。
@@ -22,14 +35,13 @@ package maskedinfer
 typedef int (*accel_fn_t)(const int8_t* W, const int64_t* bias, const uint64_t* V, int rows, int cols, uint64_t* out, int batch);
 typedef int (*abi_fn_t)(void);
 
-static void* g_accel_handle = NULL;
-static accel_fn_t g_accel_fn = NULL;
-static int g_accel_loaded = 0; // 0=未尝试, 1=已加载可用, -1=不可用
-
-// 尝试从给定路径加载加速后端 .so，解析统一符号 accel_cipher_linear_int128，
+// 从给定路径加载加速后端 .so，解析统一符号 accel_cipher_linear_int128，
 // 并校验 ABI 版本（required_abi 为网关侧期望版本，须与后端 accel_cipher_linear_int128_abi_version 一致）。
-// 返回 0 成功；-1 dlopen 失败；-2 主符号缺失；-3 路径为空；-4 ABI 版本符号缺失；-5 ABI 版本不匹配。
-static int maskedinfer_load_accel(const char* path, int required_abi) {
+// 成功时 *out_fn 置为主符号函数指针（句柄与符号进程内常驻，不做 dlclose）。
+// 返回 0 成功；-1 dlopen 失败；-2 主符号缺失；-3 路径/出参为空；-4 ABI 版本符号缺失；-5 ABI 版本不匹配。
+// 失败路径上的句柄立即 dlclose（不留悬挂句柄）。
+static int maskedinfer_load_accel(const char* path, int required_abi, void** out_fn) {
+    if (out_fn == NULL) return -3;
     if (path == NULL || *path == '\0') return -3;
     void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (h == NULL) return -1;
@@ -38,16 +50,14 @@ static int maskedinfer_load_accel(const char* path, int required_abi) {
     abi_fn_t abi_fn = (abi_fn_t)dlsym(h, "accel_cipher_linear_int128_abi_version");
     if (abi_fn == NULL) { dlclose(h); return -4; }
     if (abi_fn() != required_abi) { dlclose(h); return -5; }
-    g_accel_handle = h;
-    g_accel_fn = (accel_fn_t)sym;
-    g_accel_loaded = 1;
+    *out_fn = sym;
     return 0;
 }
 
-// 调用加速后端；若未加载返回 -9。
-static int maskedinfer_call_accel(const int8_t* W, const int64_t* bias, const uint64_t* V, int rows, int cols, uint64_t* out, int batch) {
-    if (g_accel_loaded != 1 || g_accel_fn == NULL) return -9;
-    return g_accel_fn(W, bias, V, rows, cols, out, batch);
+// 经指定后端函数指针调用加速内核；fn 为空返回 -9。
+static int maskedinfer_call_accel_fn(void* fn, const int8_t* W, const int64_t* bias, const uint64_t* V, int rows, int cols, uint64_t* out, int batch) {
+    if (fn == NULL) return -9;
+    return ((accel_fn_t)fn)(W, bias, V, rows, cols, out, batch);
 }
 */
 import "C"
@@ -55,6 +65,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,50 +81,241 @@ var ErrAccelUnavailable = errors.New("maskedinfer: 加速后端不可用，请�
 // accel_linear_int128.h 中 ACCEL_LINEAR_INT128_ABI_VERSION 保持一致。
 const accelLinearInt128ABIVersion = 1
 
-var (
-	accelOnce    sync.Once
-	accelLoadErr error
-)
-
-// resetAccelStateForTest 仅供测试：重置一次性加载状态，使「未配置后端 → 回退」分支
-// 在单进程内可重复验证（生产路径不调用）。
-func resetAccelStateForTest() {
-	accelOnce = sync.Once{}
-	accelLoadErr = nil
+// AccelBackend 池内单个加速后端：key = 受信绝对路径（去空白），fn = 已解析的
+// accel_cipher_linear_int128 函数指针（C ABI；句柄进程生命周期内常驻，不 dlclose）。
+type AccelBackend struct {
+	key string
+	fn  unsafe.Pointer
 }
 
-// loadAccelOnce 执行一次后端加载（candidates 为候选 .so 路径；空则回退 env ACCEL_BACKEND_LIB）。
-// 注意：本函数自身不得再调用 accelOnce.Do，否则会与外层 Once 形成不可重入死锁
-// （sync.Once 非可重入，嵌套 Do 同一 Once 会自锁）。仅由 accelOnce.Do 包一层。
-func loadAccelOnce(candidates []string) {
+// Key 返回后端键（受信绝对路径）。
+func (b *AccelBackend) Key() string { return b.key }
+
+// AccelPool 加速后端池：per-key 惰性加载（单飞），多后端并存，按候选序回退。
+//
+// 并发模型：
+//   - loadMu：序列化 per-key 加载（加载为一次性事件，锁竞争可忽略）＝单飞；
+//   - mu（RWMutex）：保护 backends / loadErrs / defaultKey / defaultErr / resolved；
+//   - 加载在 loadMu 内执行，先 RLock 双重检查再 dlopen，重复 dlopen 同一路径
+//     （若发生）亦无害（dlopen 引用计数，同句柄）。
+type AccelPool struct {
+	loadMu sync.Mutex
+
+	mu         sync.RWMutex
+	backends   map[string]*AccelBackend // key → 已加载后端（每 key 最多加载一次）
+	loadErrs   map[string]error         // key → 加载失败缓存（确定性：失败不重试）
+	order      []string                 // 候选序（ACCEL_BACKEND_LIB / Init 顺序；默认与回退序）
+	defaultKey string                   // Acquire("") 解析出的默认后端
+	defaultErr error                    // 默认解析失败缓存（等价旧版 accelLoadErr 缓存语义）
+	resolved   bool                     // 默认解析是否已尝试（含失败）
+	poolOff    bool                     // ACCEL_POOL=off：禁用运行期多后端选择（hint 拒绝）
+}
+
+// newAccelPool 构建池：candidates 为显式候选路径（空则回退 env ACCEL_BACKEND_LIB，逗号分隔）。
+// off=true 时仍保留完整候选序（默认解析行为与旧实现一致），仅禁用 hint 选择。
+func newAccelPool(candidates []string, off bool) *AccelPool {
 	if len(candidates) == 0 {
 		if env := os.Getenv("ACCEL_BACKEND_LIB"); env != "" {
 			candidates = strings.Split(env, ",")
 		}
 	}
-	var lastErr error
+	order := make([]string, 0, len(candidates))
 	for _, p := range candidates {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+		if p = strings.TrimSpace(p); p != "" {
+			order = append(order, p)
 		}
-		// 安全校验（Sec-C1）：拒绝任意 env 注入路径，仅允许受信绝对路径，
+	}
+	return &AccelPool{
+		backends: map[string]*AccelBackend{},
+		loadErrs: map[string]error{},
+		order:    order,
+		poolOff:  off,
+	}
+}
+
+func poolOffFromEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("ACCEL_POOL")), "off")
+}
+
+// 全局默认池（首次使用时按 env 构建；resetAccelStateForTest 可重建）。
+var (
+	globalPoolOnce sync.Once
+	globalPool     *AccelPool
+)
+
+func defaultPool() *AccelPool {
+	globalPoolOnce.Do(func() { globalPool = newAccelPool(nil, poolOffFromEnv()) })
+	return globalPool
+}
+
+// resetAccelStateForTest 仅供测试：重建全局池，使「未配置后端 → 回退」等分支
+// 在单进程内可重复验证（生产路径不调用）。
+func resetAccelStateForTest() {
+	globalPoolOnce = sync.Once{}
+	globalPool = newAccelPool(nil, poolOffFromEnv())
+	globalPoolOnce.Do(func() {}) // 标记已初始化，避免 defaultPool() 二次重建覆盖
+}
+
+// loadKeyLocked 加载单个 key（须持 loadMu；RLock 双重检查防重复加载）。
+// 成功缓存进 backends；失败（含路径校验拒绝）缓存进 loadErrs，不重试。
+func (p *AccelPool) loadKeyLocked(key string) (*AccelBackend, error) {
+	p.mu.RLock()
+	if b, ok := p.backends[key]; ok {
+		p.mu.RUnlock()
+		return b, nil
+	}
+	if cached, ok := p.loadErrs[key]; ok {
+		p.mu.RUnlock()
+		return nil, cached
+	}
+	p.mu.RUnlock()
+
+	var b *AccelBackend
+	var err error
+	if verr := validateAccelLibPath(key); verr != nil {
+		// 安全校验（Sec-C1）：拒绝任意注入路径，仅允许受信绝对路径，
 		// 且必须是普通文件、非符号链接、不被 group/other 写入，以防 TEE 进程内代码注入。
-		if err := validateAccelLibPath(p); err != nil {
-			lastErr = fmt.Errorf("后端路径 %q 校验失败: %w", p, err)
-			continue
-		}
-		rc := C.maskedinfer_load_accel(C.CString(p), C.int(accelLinearInt128ABIVersion))
+		err = fmt.Errorf("后端路径 %q 校验失败: %w", key, verr)
+	} else {
+		var fnPtr unsafe.Pointer
+		cp := C.CString(key)
+		rc := C.maskedinfer_load_accel(cp, C.int(accelLinearInt128ABIVersion), &fnPtr)
+		C.free(unsafe.Pointer(cp))
 		if rc == 0 {
-			accelLoadErr = nil
-			return
+			b = &AccelBackend{key: key, fn: fnPtr}
+		} else {
+			err = fmt.Errorf("后端路径 %q 加载失败 rc=%d（-1 dlopen/-2 主符号缺失/-3 路径空/-4 ABI符号缺失/-5 版本不匹配）", key, int(rc))
 		}
-		lastErr = fmt.Errorf("后端路径 %q 加载失败 rc=%d（-1 dlopen/-2 主符号缺失/-4 ABI符号缺失/-5 版本不匹配）", p, int(rc))
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if b != nil {
+		p.backends[key] = b
+		return b, nil
+	}
+	p.loadErrs[key] = err
+	log.Printf("[accel] 后端加载失败（已缓存，不再重试；%d/%d 候选可用）: %v", len(p.backends), len(p.order), err)
+	return nil, err
+}
+
+// get 惰性获取单个 key 的后端（loadMu 单飞）。
+func (p *AccelPool) get(key string) (*AccelBackend, error) {
+	p.loadMu.Lock()
+	defer p.loadMu.Unlock()
+	return p.loadKeyLocked(key)
+}
+
+// Acquire 按 hint 选择后端：
+//   - hint 空：按 order 首个可用者（默认解析，结果缓存——与旧版 sync.Once 语义等价）；
+//     全部候选失败/无候选 → ErrAccelUnavailable（CPU 回退语义不变）；
+//   - hint 非空：必须是候选列表内的 key（信任输入不变，禁止运行期注入任意路径）；
+//     ACCEL_POOL=off 时拒绝 hint。
+func (p *AccelPool) Acquire(hint string) (*AccelBackend, error) {
+	if hint != "" {
+		if p.poolOff {
+			return nil, fmt.Errorf("%w: ACCEL_POOL=off 已禁用运行期后端选择", ErrAccelUnavailable)
+		}
+		key := strings.TrimSpace(hint)
+		p.mu.RLock()
+		inOrder := false
+		for _, k := range p.order {
+			if k == key {
+				inOrder = true
+				break
+			}
+		}
+		p.mu.RUnlock()
+		if !inOrder {
+			return nil, fmt.Errorf("%w: hint %q 不在候选列表（候选 %d 个）", ErrAccelUnavailable, key, len(p.order))
+		}
+		return p.get(key)
+	}
+
+	// 默认解析（缓存）。
+	p.mu.RLock()
+	if p.resolved {
+		key, derr := p.defaultKey, p.defaultErr
+		p.mu.RUnlock()
+		if derr != nil {
+			return nil, derr
+		}
+		return p.backends[key], nil
+	}
+	p.mu.RUnlock()
+
+	p.loadMu.Lock()
+	defer p.loadMu.Unlock()
+	// 双重检查（另一 goroutine 可能已完成解析）。
+	p.mu.RLock()
+	if p.resolved {
+		key, derr := p.defaultKey, p.defaultErr
+		p.mu.RUnlock()
+		if derr != nil {
+			return nil, derr
+		}
+		return p.backends[key], nil
+	}
+	p.mu.RUnlock()
+
+	var lastErr error
+	for _, key := range p.order {
+		b, err := p.loadKeyLocked(key)
+		if err == nil {
+			p.mu.Lock()
+			p.defaultKey = key
+			p.resolved = true
+			p.mu.Unlock()
+			return b, nil
+		}
+		lastErr = err
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("未配置加速后端 .so（候选 0 个）")
 	}
-	accelLoadErr = lastErr
+	p.mu.Lock()
+	p.defaultErr = fmt.Errorf("%w: %v", ErrAccelUnavailable, lastErr)
+	p.resolved = true
+	p.mu.Unlock()
+	return nil, p.defaultErr
+}
+
+// AcquireAccelBackend 全局池入口：按 hint 选择加速后端（hint 空 = 默认候选序首个可用）。
+// 网关侧 route2step/adapter 可按请求上下文透传 hint（M5-2 调度 API 的落点；一期可全默认）。
+func AcquireAccelBackend(hint string) (*AccelBackend, error) {
+	return defaultPool().Acquire(hint)
+}
+
+// InitAccelBackend 由网关在启动时显式调用：以指定候选路径（按序尝试）初始化全局池；
+// 为空时回退到环境变量 ACCEL_BACKEND_LIB（逗号分隔）。
+// 首次调用生效（设定候选序并同步解析默认后端）；后续调用仅返回默认解析结果。
+// 默认解析失败不致命：返回错误供调用方记录，后续 AccelLinearInt128 会返回
+// ErrAccelUnavailable 由调用方回退 CPU 路径。
+func InitAccelBackend(paths ...string) error {
+	pool := defaultPool()
+	pool.mu.Lock()
+	if !pool.resolved {
+		pool.order = normalizeCandidates(paths)
+	}
+	pool.mu.Unlock()
+	_, err := pool.Acquire("")
+	return err
+}
+
+// normalizeCandidates 规整候选列表（去空白、去空项）；空输入回退 env ACCEL_BACKEND_LIB。
+func normalizeCandidates(candidates []string) []string {
+	if len(candidates) == 0 {
+		if env := os.Getenv("ACCEL_BACKEND_LIB"); env != "" {
+			candidates = strings.Split(env, ",")
+		}
+	}
+	order := make([]string, 0, len(candidates))
+	for _, p := range candidates {
+		if p = strings.TrimSpace(p); p != "" {
+			order = append(order, p)
+		}
+	}
+	return order
 }
 
 // validateAccelLibPath 对受信后端 .so 路径做最小安全校验（防 TEE 进程内任意代码注入）：
@@ -141,31 +343,29 @@ func validateAccelLibPath(p string) error {
 	return nil
 }
 
-// InitAccelBackend 由网关在启动时显式调用：加载指定/环境给定的后端 .so。
-// 传入候选路径列表（按序尝试）；为空时回退到环境变量 ACCEL_BACKEND_LIB（逗号分隔）。
-// 加载失败不致命：仅记录，后续 AccelLinearInt128 会返回 ErrAccelUnavailable 由调用方回退。
-// 多次调用只有首次生效（sync.Once）。返回首次加载的结果（nil 表示成功加载一个）。
-func InitAccelBackend(paths ...string) error {
-	accelOnce.Do(func() { loadAccelOnce(paths) })
-	return accelLoadErr
-}
-
-// ensureAccelLoaded 惰性触发加载（仅在尚未尝试过时）：优先用显式/环境变量候选。
-func ensureAccelLoaded() {
-	accelOnce.Do(func() { loadAccelOnce(nil) })
-}
-
-// AccelLinearInt128 经加速后端（CUDA / 昇腾 Ascend）计算掩码线性层。
+// AccelLinearInt128 经默认加速后端（CUDA / 昇腾 Ascend）计算掩码线性层。
 // 后端不可用或调用失败时返回 ErrAccelUnavailable，调用方应回退 CipherLinearInt128。
 //
 // 算术语义与 CipherLinearInt128（int128_linear.go）逐位一致：
 //
 //	y[b][i] = ( Σ_j W[i*cols+j] · V[b*cols+j] + bias[i] ) mod 2^64
 func (m *QuantizedMatrix) AccelLinearInt128(V [][]uint64) ([][]uint64, error) {
-	ensureAccelLoaded()
-	if accelLoadErr != nil {
+	return m.AccelLinearInt128Via("", V)
+}
+
+// AccelLinearInt128Via 经 hint 指定的加速后端计算掩码线性层（M5-1 按请求选择；
+// hint 空 = 默认候选序首个可用）。后端不可用或调用失败时返回 ErrAccelUnavailable，
+// 调用方应回退 CipherLinearInt128。算术语义同 AccelLinearInt128。
+func (m *QuantizedMatrix) AccelLinearInt128Via(hint string, V [][]uint64) ([][]uint64, error) {
+	backend, err := defaultPool().Acquire(hint)
+	if err != nil {
 		return nil, ErrAccelUnavailable
 	}
+	return m.accelLinearWith(backend, V)
+}
+
+// accelLinearWith 经已 Acquire 的后端执行线性内核（AccelLinearInt128Via 的执行段）。
+func (m *QuantizedMatrix) accelLinearWith(backend *AccelBackend, V [][]uint64) ([][]uint64, error) {
 	// 后端仅支持 int8 量化权重：超出 [-128,127] 时 int8 截断会失真，
 	// 返回 ErrAccelUnavailable 由调用方回退到 CPU 路径（CipherLinearInt128 用全 int64）。
 	for _, v := range m.Data {
@@ -201,7 +401,8 @@ func (m *QuantizedMatrix) AccelLinearInt128(V [][]uint64) ([][]uint64, error) {
 	}
 	flatOut := make([]uint64, batch*m.Rows)
 
-	rc := C.maskedinfer_call_accel(
+	rc := C.maskedinfer_call_accel_fn(
+		backend.fn,
 		(*C.int8_t)(unsafe.Pointer(&w8[0])),
 		(*C.int64_t)(unsafe.Pointer(&bias64[0])),
 		(*C.uint64_t)(unsafe.Pointer(&flatV[0])),
@@ -210,7 +411,7 @@ func (m *QuantizedMatrix) AccelLinearInt128(V [][]uint64) ([][]uint64, error) {
 		C.int(batch),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("maskedinfer: 加速后端调用失败 rc=%d: %w", int(rc), ErrAccelUnavailable)
+		return nil, fmt.Errorf("maskedinfer: 加速后端 %s 调用失败 rc=%d: %w", backend.key, int(rc), ErrAccelUnavailable)
 	}
 	out := make([][]uint64, batch)
 	for b := 0; b < batch; b++ {
