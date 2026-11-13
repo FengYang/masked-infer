@@ -372,3 +372,43 @@ func TestAccelPoolSwitchDefaultBackendOff(t *testing.T) {
 		t.Fatal("off 模式应拒绝运行期切换")
 	}
 }
+
+// TestAccelDispatchRejectsLiteralBackendAndFallsBackCPU M-5/G-3 负向用例：
+// ACCEL_BACKEND_LIB 的运行期契约是「逗号分隔的受信绝对路径候选」；
+// 把构建期轨道字面量（cuda/ascend/both）或相对路径注入时，必须被路径校验拒绝，
+// 且 AccelLinearInt128 返回 ErrAccelUnavailable 由调用方回退 CPU 路径（不得静默放行）。
+func TestAccelDispatchRejectsLiteralBackendAndFallsBackCPU(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261113))
+	m := randMatrixWithBias(t, rng, 4, 8)
+	V := [][]uint64{{1, 2, 3, 4, 5, 6, 7, 8}}
+
+	for _, literal := range []string{"cuda", "ascend", "both", "./libaccel.so", "libaccel.so"} {
+		t.Run(literal, func(t *testing.T) {
+			t.Setenv("ACCEL_BACKEND_LIB", literal)
+			t.Setenv("ACCEL_POOL", "")
+			resetAccelStateForTest()
+			defer func() {
+				os.Unsetenv("ACCEL_BACKEND_LIB")
+				resetAccelStateForTest()
+			}()
+			if err := InitAccelBackend(); err == nil {
+				t.Fatalf("字面量/相对路径 %q 应被拒绝（IsAbs 契约）", literal)
+			}
+			if _, err := m.AccelLinearInt128(V); err == nil {
+				t.Fatalf("%q: 应返回 ErrAccelUnavailable 交由调用方回退 CPU", literal)
+			}
+			cpu, err := m.CipherLinearInt128(V)
+			if err != nil || len(cpu) != 1 || len(cpu[0]) != 4 {
+				t.Fatalf("%q: CPU 回退路径不可用: err=%v out=%v", literal, err, cpu)
+			}
+			// 校验和/句柄：确认池未把非法 key 记成已加载后端。
+			p := defaultPool()
+			p.mu.RLock()
+			n := len(p.backends)
+			p.mu.RUnlock()
+			if n != 0 {
+				t.Fatalf("%q: 非法候选不应进入已加载后端池（n=%d）", literal, n)
+			}
+		})
+	}
+}
