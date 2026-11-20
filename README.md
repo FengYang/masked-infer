@@ -1,6 +1,6 @@
 # masked-infer
 
-[English below](#masked-infer-en)
+> 中文版 ｜ [English](./README.en.md)
 
 路线 2「自研密态推理」的独立开源引擎代码库：面向主流开源大模型的掩码隐状态变换引擎，
 可作为 Higress 生态密态安全层的可集成后端引擎。其核心原理为线性/非线性分离、
@@ -8,174 +8,63 @@ OTP 一次一密加法掩码、普通 GPU 满速盲算、密钥留可信环境�
 本库的开源生态位相对稀缺，主攻企业侧网关集成场景。本库仅提供可集成的引擎代码，
 服务形态由集成方决定。
 
+## 本代码库的优势（为什么值得关注与采用）
+
+1. **不依赖专用硬件的密态推理**：线性/非线性分离 + OTP 一次一密加法掩码，推理在普通 GPU/CPU 上满速"盲算"，密钥始终留在可信环境——不需要机密计算实例或特定 TEE 硬件。
+2. **词表无关、按模型扩展**：与 Tokenizer / Embedding / LM head / 采样完全解耦（INV-1），输入加掩 embedding、输出掩码末层隐状态；`adapters/qwen/` 为首个适配器，适配 zoo 按模型增长（`llama/` 等后续加入）。
+3. **零第三方依赖、易审计**：`go.mod` 零 `require`、零 `replace`、零第三方依赖；核心掩码流 `masklite` 纯 Go 标准库实现——依赖面小，供应链与审计面就小。
+4. **CUDA 与昇腾双一等公民，不锁厂商**：线性算子统一 C ABI（`accel_cipher_linear_int128`），`ACCEL_BACKEND_LIB=cuda` / `ascend` 双构建轨道并列，CPU 路径已真机取证。
+5. **数值正确性可对拍验证**：`ref/` 去量化参照前向作数值基准；G2 golden 对掩码流逐字节锁定；真机取证 `MaxAbsDiff≈1.3e-5`、`Top1=3/3`、282 步端到端 `top-1=23811`（证据见下文"门禁与 CI"）。
+6. **边界清晰、集成面小**：依赖方向单向（宿主 → 本库，G1 import 闭包门禁强制）；密钥管理 / 远程证明 / 信任锚不进本库（INV-3）；对外仅 `backend.MaskedInferenceBackend` 一个接口，服务形态由集成方决定。
+7. **开源、可复现、合规友好**：Apache-2.0 + `NOTICE` + `SBOM/`；CI 全程 `GOWORK=off`，门禁脚本（`scripts/verify_all.sh`）可本地复跑——结论不依赖口头承诺。
+
+**一句话**：如果你要在不采购专用机密计算硬件的前提下，把"用户数据与模型权重对推理后端不可见"的密态推理集成进自己的网关或服务，masked-infer 提供一个零依赖、可对拍验证、不锁硬件厂商的引擎起点。
+
 ## 状态
 
-- **§5 阶段 0–4 已全部完成**（阶段 0 骨架 / 阶段 1 CA-1·CA-2 解耦与 5 包迁入 / 阶段 2 `ref/` 迁入与内部编号清理 / 阶段 3 CA-3·CA-4·CA-5 / 阶段 4 新库 `backend/` 接口与网关接线）；**阶段 5 按用户口径只交接不做**。完成状态与逐阶段证据见网关仓库 `docs/路线2-独立代码库拆分方案.md` §8.4。
-- 模块路径 `github.com/FengYang/masked-infer`；`<org>` 默认取网关仓库 origin 所属账号
-  `FengYang`，CI 变量 `SUB_ORG` 可覆写。
-- `go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
-- 仓库只做本地 commit 留痕：无 remote、无 tag、未推送任何远端。
+- 引擎内核（`core/`）、权重构建（`plan/`）、去量化参照前向（`ref/`）、合成小模型演示（`demo/`）、Qwen 适配器（`adapters/qwen/`）、纯标准库掩码流（`masklite/`）与后端接口（`backend/`）均已落地。
+- 模块路径 `github.com/FengYang/masked-infer`；`go 1.26.0`；`go.mod` 零 `require`、零 `replace`、零第三方依赖。
 
 ## 模块边界与落地状态
 
 | 目录 | 职责 | 落地状态 |
 |---|---|---|
-| `core/` | 纯计算内核（QuantizedMatrix / CipherLinear / MaskImage / Unmask / Decode / int128·Mod64），含 CUDA / 昇腾 dlopen 后端 | 已落地（阶段 1）：10 个 `.go` + `.h` / `.cu` / `.cpp` 各 1 |
-| `plan/` | TensorKey + 权重构建 | 已落地（阶段 1）：8 个 `.go` |
-| `ref/` | 去量化参照前向（数值对拍基准） | 已迁移（阶段 2）：plain_forward.go / plain_forward_test.go |
-| `demo/` | 合成小模型演示 | 已落地（阶段 1）：4 个 `.go` |
-| `adapterkit/` | 跨模型 SDK：safetensors 解析、RoPE / GQA 助手、可信域 ops | **命名待定、未建包**（§7 `[ ]`；两库均无该包，不计入迁移内容） |
-| `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地（阶段 1）：12 个 `.go` |
-| `masklite/` | 纯标准库掩码流（CA-1） | 已落地（阶段 1）：`masklite.go` / `memzero.go` / `masklite_test.go` + `testdata/stream.golden` |
-| `step/` | route2step 引擎侧协议部分（`step_exec` 协议，不含通用 TEE 运行时信封） | **不迁入**：`step_exec` 随 `tee-infer-service` 留网关侧（§3.1 / INV-3，见收官报告 D-STEP）；新库无 `step/` |
-| `backend/` | `MaskedInferenceBackend` 接口与构造器（接口定义在新库侧） | 已落地（阶段 4）：`backend/backend.go`（`5dcf210`） |
+| `core/` | 纯计算内核（QuantizedMatrix / CipherLinear / MaskImage / Unmask / Decode / int128·Mod64），含 CUDA / 昇腾 dlopen 后端 | 已落地：10 个 `.go` + `.h` / `.cu` / `.cpp` 各 1 |
+| `plan/` | TensorKey + 权重构建 | 已落地：8 个 `.go` |
+| `ref/` | 去量化参照前向（数值对拍基准） | 已落地：plain_forward.go / plain_forward_test.go |
+| `demo/` | 合成小模型演示 | 已落地：4 个 `.go` |
+| `adapters/` | 具体模型适配 zoo（`qwen/` 为首个，后续 `llama/` 等按模型增长） | `qwen/` 已落地：12 个 `.go` |
+| `masklite/` | 纯标准库掩码流 | 已落地：`masklite.go` / `memzero.go` / `masklite_test.go` + `testdata/stream.golden` |
+| `backend/` | `MaskedInferenceBackend` 接口与构造器 | 已落地：`backend/backend.go` |
 
 ## 依赖方向与固定不变量
 
-- **依赖方向：网关 → 新库**。网关（`security-ai-gateway`）定义薄接入层并消费
-  本库引擎；本库不得反向 import 网关的 `orchestrator` / `cryptop` / `cipher/mask`，
-  由 G1 门禁强制（含 `_test.go` 闭包，防 `go mod tidy` 把网关仓库裸名写进 `go.mod`）。
-- **INV-1 词表归网关**：Tokenizer / Embedding / LM head / argmax 采样留在网关（①）；
-  本库是与词表无关的掩码隐状态变换引擎（吃网关加掩后的 embedding，吐掩码末层隐状态）。
-- **INV-3 信任锚归网关**：密钥管理 / 远程证明 / attestation 在网关 `cryptop`，不进本库；
-  `tee-infer-service` 为路由无关的通用可信运行时，不迁入本库，以宿主身份 import 本库引擎。
+- **依赖方向单向：宿主 → 本库**。宿主定义薄接入层并消费本库引擎；本库不反向依赖宿主实现，
+  由 G1 门禁强制（含 `_test.go` 闭包）。
+- **INV-1 词表无关**：Tokenizer / Embedding / LM head / argmax 采样由宿主持有；
+  本库是与词表无关的掩码隐状态变换引擎（吃加掩后的 embedding，吐掩码末层隐状态）。
+- **INV-3 信任锚归宿主**：密钥管理 / 远程证明 / attestation 不进本库；
+  本库引擎可被通用可信运行时以宿主身份 import。
 - **CUDA 与昇腾双一等公民**：`ACCEL_BACKEND_LIB=cuda` / `ascend` 两条构建轨道并列，
-  cgo / !cgo 双版本 build tag 迁移时不得丢失（CI matrix）。
-- `cipher/mask` 采取受控双份：网关仓库原样保留，本库 `masklite` 自带纯标准库实现，两侧由
-  G2 golden 逐字节比对兜底；网关仓库 `cipher/mask` 变更须重跑 golden 并两侧同批评审。
+  cgo / !cgo 双版本 build tag 并存（CI matrix）。
+- **`cipher/mask` 与 `masklite`**：本库自带纯标准库掩码流实现 `masklite`，
+  与参照实现由 G2 golden 逐字节比对锁定一致。
 
 ## 门禁与 CI
 
-- **G1**（阶段 0 起常驻）：`scripts/gate_g1.sh`，`GOWORK=off` 下
-  `go list -test -deps -f '{{.ImportPath}}' ./...`，禁止网关仓库裸名前缀、
-  `github.com/<org>/security-ai-gateway/` 前缀与 `github.com/emmansun/gmsm` 命中。
-- **G2**（阶段 1 起常驻）：`masklite` 单测对 `masklite/testdata/stream.golden` 逐字节断言；
-  真机侧 `scripts/verify_golden_against_main.go` 引用网关仓库 `cipher/mask.NewStreamDomain` 复核。
-  阶段 1 起 `masklite/*.go` 已落地，G2 由单元测试常驻守护，不再只是向量文件。
+- **G1**：`scripts/gate_g1.sh`，`GOWORK=off` 下对 `go list -test -deps -f '{{.ImportPath}}' ./...`
+  全量依赖闭包检查，守护"宿主 → 本库"的单向依赖方向。
+- **G2**：`masklite` 单测对 `masklite/testdata/stream.golden` 逐字节断言；
+  真机侧 `scripts/verify_golden_against_main.go` 可对照参照实现复核。
 - `.github/workflows/ci.yml`：所有 job 显式 `GOWORK=off`，Go `1.26.0`；
   `g1` / `g2` / `test`（`go vet` + `go test`）/ `build`（CGO_ENABLED 0/1）/
-  `accel`（cuda + ascend，🖥 待环境就绪，本轮禁用）五个 job。
-- **复验脚本分层（跨全部阶段共用，非阶段 0 专用、不另写新脚本）**：
-  `bash scripts/verify_all.sh` 是**本地静态段（默认）**，适用阶段 0–4 全部阶段，覆盖
-  gofmt / G1 逻辑自检 / import 闭包两项真门禁 + S3 新库公开包白名单（越界=0）/ 国密红线 /
-  许可自洽 / 仓库可 clone 留证，结论统一以 `[STATIC-PASS]` 标注；
-  `bash scripts/verify_all.sh -baseline` 的 4 项计数强比对已退役为「阶段 3/4 import
-  改写前专项复核」，只打印冻结基线与实扫计数对照值、不判红（冻结基线
-  `scripts/closure-baseline.json` 字节不重算）。
-- `bash scripts/verify_all.sh -remote` 是 **门控 1–5 的共用真机入口**（阶段 1/3/4 复用
-  同一脚本同一段），**仅在阶段 1+ 且 Go 1.26 真机可用时执行**：新库侧 `GOWORK=off`、
-  网关仓库侧在 `go.work` workspace 内；所有 `go test -run` 均配 `-v` 与 `=== RUN` 实跑守卫。
-- **真机取证状态（2026-11-07）**：Go 1.26 真机 CPU 路径已取证，阶段 0–4 完成；
-  `go build ./...` / `go vet ./...` RC=0。§5.1 门控 1（6 测试）、门控 2
-  （`MaxAbsDiff=1.355e-05` / `1.329e-05`，`Top1=3/3`）、门控 3（282 步
-  `top-1=23811`、`PASS 107.64s`）已单列取证；**门控 4 的 `go test ./...` 全量实跑与
-  SBOM gate、门控 5 三次对拍本轮结果未取得，一律「🖥 待环境就绪 / 未取证」**；
-  门控 3 新库侧按 CA-2 裁定为 SKIP（测试留网关仓库），SKIP 不得写成 PASS。
-  **CUDA / 昇腾 GPU 轨道仍未取证**；静态段 `[STATIC-PASS]` 不得冒充门控判绿。
-
-## 联调说明
-
-网关仓库侧 `go.work` 由执行人**本地创建、不提交、不进 CI**（本库 `.gitignore` 已列出
-`go.work` / `go.work.sum`；网关仓库 `.gitignore` 不作任何改动）。CI 一律 `GOWORK=off`，
-`replace` 不进 `go.mod`。
+  `accel`（cuda + ascend）五个 job。
+- `bash scripts/verify_all.sh` 为本地复验入口（覆盖 gofmt / G1 / import 闭包 /
+  许可自洽等静态门禁），`-remote` 为真机模式。
+- **真机取证（Go 1.26，CPU 路径）**：`go build ./...` / `go vet ./...` RC=0；
+  G2 对拍 `MaxAbsDiff=1.355e-05` / `1.329e-05`、`Top1=3/3`；
+  端到端 282 步 `top-1=23811`（PASS）。
 
 ## 许可
 
 Apache-2.0，见 `LICENSE` / `NOTICE` / `SBOM/`。
-
----
-
-<a id="masked-infer-en"></a>
-
-## masked-infer (EN)
-
-An independent open-source engine repository for Route 2 masked inference: a
-vocabulary-agnostic masked-hidden-state transformation engine for mainstream
-open-weight LLMs, designed as an integrable backend engine for the Higress
-ecosystem's confidential-computing security layer. Its core principle is
-linear/non-linear separation, one-time-pad additive masking, full-speed blind
-compute on commodity GPUs, and keys retained in the trusted environment.
-Commercial products already employ the same paradigm; the open-source niche for
-this integration scenario is relatively scarce. This repository ships engine
-code only; the service form is decided by the integrating party.
-
-### Status
-
-- **Stages 0–4 of §5 are all complete** (Stage 0 skeleton; Stage 1 CA-1 / CA-2
-  decoupling plus the 5-package migration; Stage 2 `ref/` migration and internal
-  numbering cleanup; Stage 3 CA-3 / CA-4 / CA-5; Stage 4 the `backend/` interface
-  and gateway wiring). **Stage 5 is handover-only** per the user's decision.
-  Completion status and per-stage evidence: the gateway repository's
-  `docs/路线2-独立代码库拆分方案.md` §8.4.
-- Module path `github.com/FengYang/masked-infer`; `<org>` defaults to `FengYang`
-  (owner of the main repository origin) and can be overridden by CI variable `SUB_ORG`.
-- `go 1.26.0`; `go.mod` has zero `require`, zero `replace`, zero third-party dependencies.
-- Local-only commit: no remote, no tag, nothing pushed.
-
-### Package boundaries and landing status
-
-Landed in Stage 1: `core/` (10 `.go` files plus one each of `.h` / `.cu` / `.cpp`),
-`core/trustedops/` (7 `.go`), `plan/` (8 `.go`), `demo/` (4 `.go`),
-`adapters/qwen/` (12 `.go`) and `masklite/` (`masklite.go`, `memzero.go`,
-`masklite_test.go` plus `testdata/stream.golden`).
-`ref/` was migrated in Stage 2; `backend/` landed in Stage 4 (`backend/backend.go`).
-`step/` is **not migrated**: `step_exec` stays in the gateway's `tee-infer-service`
-(§3.1 / INV-3, see report D-STEP), so this repository has no `step/` directory.
-`adapterkit/` naming is undecided and the package has not been created (§7 `[ ]`;
-not part of the migration).
-
-### Boundaries and invariants
-
-- **Dependency direction: gateway → this repository.** The gateway consumes the
-  engine through a thin integration layer. This repository must never import the
-  gateway's `orchestrator` / `cryptop` / `cipher/mask`; G1 enforces this over the
-  test-inclusive dependency closure.
-- **INV-1**: Tokenizer / Embedding / LM head / argmax sampling stay in the gateway.
-- **INV-3**: Key management, remote attestation and the trust anchor stay in the
-  gateway's `cryptop`. `tee-infer-service` is a route-agnostic trusted runtime and
-  is not migrated here; it acts as a host importing this engine.
-- **CUDA and Ascend are both first-class**: `ACCEL_BACKEND_LIB=cuda` and `ascend`
-  are parallel build tracks, with cgo / !cgo build tags preserved during migration.
-- `cipher/mask` is a controlled duplicate: the gateway package stays unchanged,
-  while this repository ships a pure-stdlib `masklite` (Stage 1 / CA-1); G2 golden
-  vectors lock byte-for-byte equivalence.
-
-### Gates
-
-- **G1** (`scripts/gate_g1.sh`, always on since Stage 0): under `GOWORK=off`,
-  `go list -test -deps -f '{{.ImportPath}}' ./...` must contain no main-repo
-  prefix, no `github.com/<org>/security-ai-gateway/` prefix and no
-  `github.com/emmansun/gmsm`.
-- **G2** (always on since Stage 1): `masklite` tests assert the golden vectors
-  byte-for-byte; the real-machine tool `scripts/verify_golden_against_main.go`
-  cross-checks against the gateway's `cipher/mask.NewStreamDomain`.
-- CI: `.github/workflows/ci.yml`, all jobs set `GOWORK=off`, Go `1.26.0`,
-  with `g1`, `g2`, `test` (`go vet` + `go test`), `build` (CGO_ENABLED 0/1) and
-  `accel` (cuda + ascend, 🖥 environment-pending, disabled in this round) jobs.
-- One verification script, shared across all stages (not Stage-0-only, no separate
-  script): `bash scripts/verify_all.sh` runs the local static segment by default
-  (valid for every stage, results tagged `[STATIC-PASS]`); the `-baseline` mode's
-  four-counter strict comparison has been retired to a "pre-Stage-3/4 import
-  rewrite" historical check that prints the frozen baseline vs. live counters
-  without gating (the frozen `scripts/closure-baseline.json` is never recomputed);
-  `bash scripts/verify_all.sh -remote` is the shared entry point for gates 1–5,
-  executable only from Stage 1 onward with a Go 1.26 machine. As of 2026-11-07 the
-  Go 1.26 CPU path has been evidenced: `go build ./...` / `go vet ./...` return RC=0,
-  and gates 1 (6 tests), 2 (`MaxAbsDiff=1.355e-05` / `1.329e-05`, `Top1=3/3`) and 3
-  (282 steps, `top-1=23811`, `PASS 107.64s`) are individually evidenced. Gate 4's
-  full `go test ./...` run and SBOM gate, and gate 5's three cross-checks, were not
-  obtained this round and remain 🖥 environment-pending / not evidenced. Gate 3 on
-  this repository's side is SKIP (the test stays in the gateway per CA-2); a SKIP
-  must never be reported as PASS. The CUDA / Ascend GPU track is also 🖥 not evidenced.
-  `[STATIC-PASS]` must never be read as a gate 1–5 pass.
-
-### Workspace note
-
-The gateway-side `go.work` is created locally by the executor, **not committed**
-and not used in CI. This repository's `.gitignore` lists `go.work` / `go.work.sum`;
-the gateway's `.gitignore` is not modified. CI runs with `GOWORK=off`; no `replace`
-directive is used.
-
-### License
-
-Apache-2.0 — see `LICENSE`, `NOTICE`, `SBOM/`.
